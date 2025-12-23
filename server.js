@@ -1,13 +1,17 @@
 import express from "express";
 import axios from "axios";
 import dotenv from "dotenv";
+import fs from "fs";
+import cors from "cors";
 
 dotenv.config();
 
 const app = express();
+app.use(cors()); // 🔴 REQUIRED
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
+const TOKEN_FILE = "./ebay_tokens.json";
 
 /* =========================
    HEALTH CHECK
@@ -20,18 +24,20 @@ app.get("/", (req, res) => {
    TOKEN EXCHANGE ENDPOINT
 ========================= */
 app.post("/oauth/exchange", async (req, res) => {
+  console.log("📩 /oauth/exchange called");
+
+  const { code } = req.body;
+
+  if (!code) {
+    return res.status(400).json({ error: "Authorization code missing" });
+  }
+
   try {
-    const { code } = req.body;
-
-    if (!code) {
-      return res.status(400).json({ error: "Authorization code missing" });
-    }
-
     const tokenResponse = await axios.post(
       "https://api.ebay.com/identity/v1/oauth2/token",
       new URLSearchParams({
         grant_type: "authorization_code",
-        code: code,
+        code,
         redirect_uri: process.env.EBAY_RUNAME
       }),
       {
@@ -46,33 +52,23 @@ app.post("/oauth/exchange", async (req, res) => {
       }
     );
 
-    const refreshToken = tokenResponse.data.refresh_token;
+    const { refresh_token } = tokenResponse.data;
 
-    console.log("✅ REFRESH TOKEN RECEIVED:");
-    console.log(refreshToken);
-
-    /*
-      🔴 IMPORTANT ACTION FOR YOU:
-      Copy the refresh token from logs and save it in Render as:
-      EBAY_REFRESH_TOKEN=xxxxxxxx
-    */
-
-    res.json({
-      success: true,
-      message: "Refresh token received. Save it in environment variables."
-    });
-
-  } catch (error) {
-    console.error(
-      "❌ Token exchange failed:",
-      error.response?.data || error.message
+    fs.writeFileSync(
+      TOKEN_FILE,
+      JSON.stringify({ refresh_token, saved_at: new Date() }, null, 2)
     );
 
+    console.log("✅ REFRESH TOKEN STORED");
+
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error("❌ TOKEN EXCHANGE ERROR:", err.response?.data || err.message);
     res.status(500).json({ error: "Token exchange failed" });
   }
 });
 
-/* ========================= */
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
