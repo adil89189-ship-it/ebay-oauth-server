@@ -1,19 +1,15 @@
 import express from "express";
 import axios from "axios";
 import dotenv from "dotenv";
-import cors from "cors";
+import fs from "fs";
 
 dotenv.config();
 
 const app = express();
-
-/* =========================
-   MIDDLEWARE
-========================= */
-app.use(cors());            // ✅ REQUIRED for Chrome extension
-app.use(express.json());    // ✅ REQUIRED to read JSON body
+app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
+const TOKEN_FILE = "./ebay_tokens.json";
 
 /* =========================
    HEALTH CHECK
@@ -52,28 +48,41 @@ app.post("/oauth/exchange", async (req, res) => {
       }
     );
 
-    const { access_token, refresh_token, expires_in } = tokenResponse.data;
+    const {
+      access_token,
+      refresh_token,
+      expires_in
+    } = tokenResponse.data;
 
-    console.log("ACCESS TOKEN RECEIVED");
-    console.log("REFRESH TOKEN RECEIVED");
-    console.log("EXPIRES IN:", expires_in);
+    // =========================
+    // STORE REFRESH TOKEN SAFELY
+    // =========================
+    const dataToStore = {
+      refresh_token,
+      obtained_at: Date.now(),
+      expires_in
+    };
 
-    // ⚠️ Next step: store refresh_token securely (DB / encrypted storage)
+    fs.writeFileSync(TOKEN_FILE, JSON.stringify(dataToStore, null, 2));
 
-    res.json({ success: true });
+    console.log("✅ REFRESH TOKEN STORED SUCCESSFULLY");
+
+    res.json({
+      success: true,
+      message: "Refresh token stored securely"
+    });
 
   } catch (error) {
     console.error(
-      "Token exchange failed:",
+      "❌ Token exchange failed:",
       error.response?.data || error.message
     );
+
     res.status(500).json({ error: "Token exchange failed" });
   }
 });
 
-/* =========================
-   START SERVER
-========================= */
+/* ========================= */
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
