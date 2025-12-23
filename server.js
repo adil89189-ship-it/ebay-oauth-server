@@ -1,13 +1,19 @@
 import express from "express";
 import axios from "axios";
 import dotenv from "dotenv";
+import cors from "cors";
 
 dotenv.config();
 
 const app = express();
-app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
+/* =========================
+   MIDDLEWARE
+========================= */
+app.use(cors());            // ✅ REQUIRED for Chrome extension
+app.use(express.json());    // ✅ REQUIRED to read JSON body
+
+const PORT = process.env.PORT || 10000;
 
 /* =========================
    HEALTH CHECK
@@ -46,30 +52,28 @@ app.post("/oauth/exchange", async (req, res) => {
       }
     );
 
-    const {
-      access_token,
-      refresh_token,
-      expires_in
-    } = tokenResponse.data;
+    const { access_token, refresh_token, expires_in } = tokenResponse.data;
 
     console.log("ACCESS TOKEN RECEIVED");
     console.log("REFRESH TOKEN RECEIVED");
+    console.log("EXPIRES IN:", expires_in);
 
-    /*
-      ⚠️ IMPORTANT (next step):
-      Store refresh_token in DB or encrypted storage
-      For now, logging confirms success
-    */
+    // ⚠️ Next step: store refresh_token securely (DB / encrypted storage)
 
     res.json({ success: true });
 
   } catch (error) {
-    console.error("Token exchange failed:", error.response?.data || error.message);
+    console.error(
+      "Token exchange failed:",
+      error.response?.data || error.message
+    );
     res.status(500).json({ error: "Token exchange failed" });
   }
 });
 
-/* ========================= */
+/* =========================
+   START SERVER
+========================= */
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
