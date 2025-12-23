@@ -2,10 +2,12 @@ import express from "express";
 import axios from "axios";
 import dotenv from "dotenv";
 import fs from "fs";
+import cors from "cors";
 
 dotenv.config();
 
 const app = express();
+app.use(cors());              // ✅ CORS ENABLED
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
@@ -81,15 +83,14 @@ app.post("/oauth/refresh", async (req, res) => {
     return res.status(400).json({ error: "No refresh token stored" });
   }
 
-  const storedData = JSON.parse(fs.readFileSync(TOKEN_FILE, "utf-8"));
-  const refreshToken = storedData.refresh_token;
+  const { refresh_token } = JSON.parse(fs.readFileSync(TOKEN_FILE, "utf-8"));
 
   try {
     const tokenResponse = await axios.post(
       "https://api.ebay.com/identity/v1/oauth2/token",
       new URLSearchParams({
         grant_type: "refresh_token",
-        refresh_token: refreshToken,
+        refresh_token,
         scope: "https://api.ebay.com/oauth/api_scope"
       }),
       {
@@ -104,14 +105,12 @@ app.post("/oauth/refresh", async (req, res) => {
       }
     );
 
-    const { access_token, expires_in } = tokenResponse.data;
-
     console.log("🔑 ACCESS TOKEN GENERATED");
 
     res.json({
       success: true,
-      access_token,
-      expires_in
+      access_token: tokenResponse.data.access_token,
+      expires_in: tokenResponse.data.expires_in
     });
 
   } catch (error) {
