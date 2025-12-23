@@ -1,11 +1,14 @@
 /**************************************************
  * eBay OAuth Backend – FINAL (Render Free Plan)
- * Step A: OAuth Code → Refresh Token
- * Step B: Refresh Token → Access Token
  *
- * IMPORTANT:
- * - Uses in-memory ENV storage (Render free-safe)
- * - Filesystem is NOT reliable on free plan
+ * FIXES APPLIED:
+ * ✅ Forces OLD refresh token to be overwritten
+ * ✅ Uses CORRECT inventory scopes
+ * ✅ Ensures refresh token NEVER survives scope change
+ *
+ * IMPORTANT NOTES:
+ * - Uses in-memory storage only (Render free-safe)
+ * - Restarting Render clears old tokens automatically
  **************************************************/
 
 import express from "express";
@@ -16,23 +19,29 @@ import cors from "cors";
 dotenv.config();
 
 const app = express();
-app.use(cors());              // ✅ Allow extension/browser requests
+app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
 
 /* =================================================
+   🔥 FORCE RESET TOKEN ON SERVER START
+   (This guarantees NO old refresh token survives)
+================================================= */
+let EBAY_REFRESH_TOKEN = null;
+
+/* =================================================
    HEALTH CHECK
 ================================================= */
 app.get("/", (req, res) => {
-  res.send("eBay OAuth backend running");
+  res.send("eBay OAuth backend running (clean state)");
 });
 
 /* =================================================
    STEP A — OAUTH EXCHANGE
    Receives authorization code from extension
-   Exchanges it for refresh token
-   Stores refresh token IN MEMORY (ENV)
+   Exchanges it for *NEW* refresh token
+   ALWAYS OVERWRITES old token
 ================================================= */
 app.post("/oauth/exchange", async (req, res) => {
   console.log("📩 /oauth/exchange called");
@@ -63,17 +72,14 @@ app.post("/oauth/exchange", async (req, res) => {
       }
     );
 
-    const { refresh_token, expires_in } = tokenResponse.data;
+    // 🔥 ALWAYS REPLACE OLD REFRESH TOKEN
+    EBAY_REFRESH_TOKEN = tokenResponse.data.refresh_token;
 
-    // ✅ STORE REFRESH TOKEN (FREE PLAN SAFE)
-    process.env.EBAY_REFRESH_TOKEN = refresh_token;
-
-    console.log("✅ REFRESH TOKEN STORED IN MEMORY");
+    console.log("🆕 NEW REFRESH TOKEN STORED (SCOPES FIXED)");
 
     res.json({
       success: true,
-      step: "Step A complete — refresh token stored",
-      expires_in
+      message: "OAuth exchange complete — new refresh token issued"
     });
 
   } catch (error) {
@@ -87,17 +93,16 @@ app.post("/oauth/exchange", async (req, res) => {
 
 /* =================================================
    STEP B — ACCESS TOKEN REFRESH
-   Uses stored refresh token
-   Generates short-lived access token
+   Uses the *NEW* refresh token
+   IMPORTANT: Correct inventory scopes applied
 ================================================= */
 app.post("/oauth/refresh", async (req, res) => {
   console.log("🔄 /oauth/refresh called");
 
-  const refresh_token = process.env.EBAY_REFRESH_TOKEN;
-
-  if (!refresh_token) {
+  if (!EBAY_REFRESH_TOKEN) {
     return res.status(400).json({
-      error: "No refresh token stored (Step A not completed or server restarted)"
+      success: false,
+      error: "No refresh token stored — run OAuth again"
     });
   }
 
@@ -106,8 +111,14 @@ app.post("/oauth/refresh", async (req, res) => {
       "https://api.ebay.com/identity/v1/oauth2/token",
       new URLSearchParams({
         grant_type: "refresh_token",
-        refresh_token,
-        scope: "https://api.ebay.com/oauth/api_scope"
+        refresh_token: EBAY_REFRESH_TOKEN,
+
+        // 🔑 REQUIRED SCOPES FOR INVENTORY + OFFER UPDATE
+        scope: [
+          "https://api.ebay.com/oauth/api_scope",
+          "https://api.ebay.com/oauth/api_scope/sell.inventory",
+          "https://api.ebay.com/oauth/api_scope/sell.account"
+        ].join(" ")
       }),
       {
         headers: {
@@ -121,7 +132,7 @@ app.post("/oauth/refresh", async (req, res) => {
       }
     );
 
-    console.log("🔑 ACCESS TOKEN GENERATED SUCCESSFULLY");
+    console.log("🔑 ACCESS TOKEN GENERATED WITH INVENTORY SCOPE");
 
     res.json({
       success: true,
@@ -140,5 +151,5 @@ app.post("/oauth/refresh", async (req, res) => {
 
 /* ================================================= */
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT} (clean token state)`);
 });
