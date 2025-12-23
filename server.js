@@ -1,7 +1,6 @@
 import express from "express";
 import axios from "axios";
 import dotenv from "dotenv";
-import fs from "fs";
 
 dotenv.config();
 
@@ -9,7 +8,6 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
-const TOKEN_FILE = "./ebay_tokens.json";
 
 /* =========================
    HEALTH CHECK
@@ -22,18 +20,18 @@ app.get("/", (req, res) => {
    TOKEN EXCHANGE ENDPOINT
 ========================= */
 app.post("/oauth/exchange", async (req, res) => {
-  const { code } = req.body;
-
-  if (!code) {
-    return res.status(400).json({ error: "Authorization code missing" });
-  }
-
   try {
+    const { code } = req.body;
+
+    if (!code) {
+      return res.status(400).json({ error: "Authorization code missing" });
+    }
+
     const tokenResponse = await axios.post(
       "https://api.ebay.com/identity/v1/oauth2/token",
       new URLSearchParams({
         grant_type: "authorization_code",
-        code,
+        code: code,
         redirect_uri: process.env.EBAY_RUNAME
       }),
       {
@@ -48,29 +46,20 @@ app.post("/oauth/exchange", async (req, res) => {
       }
     );
 
-    const {
-      access_token,
-      refresh_token,
-      expires_in
-    } = tokenResponse.data;
+    const refreshToken = tokenResponse.data.refresh_token;
 
-    // =========================
-    // STORE REFRESH TOKEN SAFELY
-    // =========================
-    const dataToStore = {
-      refresh_token,
-      obtained_at: Date.now(),
-      expires_in
-    };
-console.log("🔐 About to store refresh token");
+    console.log("✅ REFRESH TOKEN RECEIVED:");
+    console.log(refreshToken);
 
-    fs.writeFileSync(TOKEN_FILE, JSON.stringify(dataToStore, null, 2));
-
-    console.log("✅ REFRESH TOKEN STORED SUCCESSFULLY");
+    /*
+      🔴 IMPORTANT ACTION FOR YOU:
+      Copy the refresh token from logs and save it in Render as:
+      EBAY_REFRESH_TOKEN=xxxxxxxx
+    */
 
     res.json({
       success: true,
-      message: "Refresh token stored securely"
+      message: "Refresh token received. Save it in environment variables."
     });
 
   } catch (error) {
