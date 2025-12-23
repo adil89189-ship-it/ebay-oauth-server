@@ -7,7 +7,8 @@ import cors from "cors";
 dotenv.config();
 
 const app = express();
-app.use(cors());              // ✅ CORS ENABLED
+app.use(cors());
+app.options("*", cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
@@ -76,7 +77,7 @@ app.post("/oauth/exchange", async (req, res) => {
 });
 
 /* =========================
-   STEP B — ACCESS TOKEN REFRESH
+   STEP B — ACCESS TOKEN REFRESH (POST)
 ========================= */
 app.post("/oauth/refresh", async (req, res) => {
   if (!fs.existsSync(TOKEN_FILE)) {
@@ -109,13 +110,56 @@ app.post("/oauth/refresh", async (req, res) => {
 
     res.json({
       success: true,
-      access_token: tokenResponse.data.access_token,
       expires_in: tokenResponse.data.expires_in
     });
 
   } catch (error) {
     console.error("❌ Access token refresh failed:", error.response?.data || error.message);
     res.status(500).json({ error: "Access token refresh failed" });
+  }
+});
+
+/* =========================
+   DEBUG CONFIRMATION (FREE PLAN SAFE)
+========================= */
+app.get("/debug/refresh", async (req, res) => {
+  if (!fs.existsSync(TOKEN_FILE)) {
+    return res.json({ error: "No refresh token stored" });
+  }
+
+  const { refresh_token } = JSON.parse(fs.readFileSync(TOKEN_FILE, "utf-8"));
+
+  try {
+    const tokenResponse = await axios.post(
+      "https://api.ebay.com/identity/v1/oauth2/token",
+      new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token,
+        scope: "https://api.ebay.com/oauth/api_scope"
+      }),
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization:
+            "Basic " +
+            Buffer.from(
+              `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
+            ).toString("base64")
+        }
+      }
+    );
+
+    console.log("🔑 ACCESS TOKEN GENERATED (DEBUG)");
+
+    res.json({
+      success: true,
+      expires_in: tokenResponse.data.expires_in
+    });
+
+  } catch (error) {
+    res.json({
+      error: error.response?.data || error.message
+    });
   }
 });
 
