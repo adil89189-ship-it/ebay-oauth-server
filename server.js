@@ -1,14 +1,11 @@
 /**************************************************
- * eBay OAuth Backend – FINAL (Render Free Plan)
+ * eBay OAuth + Inventory Sync Backend (FINAL)
+ * Platform: Render (Free Plan Safe)
  *
- * FIXES APPLIED:
- * ✅ Forces OLD refresh token to be overwritten
- * ✅ Uses CORRECT inventory scopes
- * ✅ Ensures refresh token NEVER survives scope change
- *
- * IMPORTANT NOTES:
- * - Uses in-memory storage only (Render free-safe)
- * - Restarting Render clears old tokens automatically
+ * Endpoints:
+ * POST /oauth/exchange     → stores refresh token
+ * POST /oauth/refresh      → returns access token
+ * POST /sync/inventory     → updates eBay listing
  **************************************************/
 
 import express from "express";
@@ -25,35 +22,25 @@ app.use(express.json());
 const PORT = process.env.PORT || 10000;
 
 /* =================================================
-   🔥 FORCE RESET TOKEN ON SERVER START
-   (This guarantees NO old refresh token survives)
-================================================= */
-let EBAY_REFRESH_TOKEN = null;
-
-/* =================================================
    HEALTH CHECK
 ================================================= */
 app.get("/", (req, res) => {
-  res.send("eBay OAuth backend running (clean state)");
+  res.send("✅ eBay backend running");
 });
 
 /* =================================================
-   STEP A — OAUTH EXCHANGE
-   Receives authorization code from extension
-   Exchanges it for *NEW* refresh token
-   ALWAYS OVERWRITES old token
+   STEP A — AUTH CODE → REFRESH TOKEN
 ================================================= */
 app.post("/oauth/exchange", async (req, res) => {
-  console.log("📩 /oauth/exchange called");
+  console.log("📩 /oauth/exchange");
 
   const { code } = req.body;
-
   if (!code) {
     return res.status(400).json({ error: "Authorization code missing" });
   }
 
   try {
-    const tokenResponse = await axios.post(
+    const response = await axios.post(
       "https://api.ebay.com/identity/v1/oauth2/token",
       new URLSearchParams({
         grant_type: "authorization_code",
@@ -72,84 +59,144 @@ app.post("/oauth/exchange", async (req, res) => {
       }
     );
 
-    // 🔥 ALWAYS REPLACE OLD REFRESH TOKEN
-    EBAY_REFRESH_TOKEN = tokenResponse.data.refresh_token;
+    process.env.EBAY_REFRESH_TOKEN = response.data.refresh_token;
 
-    console.log("🆕 NEW REFRESH TOKEN STORED (SCOPES FIXED)");
+    console.log("✅ Refresh token stored in memory");
 
-    res.json({
-      success: true,
-      message: "OAuth exchange complete — new refresh token issued"
-    });
-
-  } catch (error) {
-    console.error(
-      "❌ OAuth exchange failed:",
-      error.response?.data || error.message
-    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ OAuth exchange failed", err.response?.data || err.message);
     res.status(500).json({ error: "OAuth exchange failed" });
   }
 });
 
 /* =================================================
-   STEP B — ACCESS TOKEN REFRESH
-   Uses the *NEW* refresh token
-   IMPORTANT: Correct inventory scopes applied
+   STEP B — REFRESH TOKEN → ACCESS TOKEN
 ================================================= */
-app.post("/oauth/refresh", async (req, res) => {
-  console.log("🔄 /oauth/refresh called");
+async function getAccessToken() {
+  const refreshToken = process.env.EBAY_REFRESH_TOKEN;
+  if (!refreshToken) throw new Error("No refresh token stored");
 
-  if (!EBAY_REFRESH_TOKEN) {
-    return res.status(400).json({
-      success: false,
-      error: "No refresh token stored — run OAuth again"
-    });
+  const response = await axios.post(
+    "https://api.ebay.com/identity/v1/oauth2/token",
+    new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      scope: "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory"
+    }),
+    {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization:
+          "Basic " +
+          Buffer.from(
+            `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
+          ).toString("base64")
+      }
+    }
+  );
+
+  return response.data.access_token;
+}
+
+/* =================================================
+   MAIN SYNC ENDPOINT (USED BY EXTENSION)
+================================================= */
+app.post("/sync/inventory", async (req, res) => {
+  console.log("🔄 /sync/inventory called");
+
+  const { amazonSku, amazonPrice, multiplier, inStock } = req.body;
+
+  if (!amazonSku || !amazonPrice || !multiplier) {
+    return res.status(400).json({ error: "Missing sync data" });
   }
 
-  try {
-    const tokenResponse = await axios.post(
-      "https://api.ebay.com/identity/v1/oauth2/token",
-      new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: EBAY_REFRESH_TOKEN,
+  const EBAY_SKU = `AMZ-${amazonSku}`;
+  const quantity = inStock ? 3 : 0;
+  const price = +(amazonPrice * multiplier).toFixed(2);
 
-        // 🔑 REQUIRED SCOPES FOR INVENTORY + OFFER UPDATE
-        scope: [
-          "https://api.ebay.com/oauth/api_scope",
-          "https://api.ebay.com/oauth/api_scope/sell.inventory",
-          "https://api.ebay.com/oauth/api_scope/sell.account"
-        ].join(" ")
-      }),
+  try {
+    const accessToken = await getAccessToken();
+
+    /* ---------- INVENTORY ITEM ---------- */
+    await axios.put(
+      `https://api.ebay.com/sell/inventory/v1/inventory_item/${EBAY_SKU}`,
+      {
+        availability: {
+          shipToLocationAvailability: { quantity }
+        }
+      },
       {
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Authorization:
-            "Basic " +
-            Buffer.from(
-              `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
-            ).toString("base64")
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
         }
       }
     );
 
-    console.log("🔑 ACCESS TOKEN GENERATED WITH INVENTORY SCOPE");
+    console.log("📦 Inventory item updated");
+
+    /* ---------- GET OFFER ---------- */
+    const offerRes = await axios.get(
+      `https://api.ebay.com/sell/inventory/v1/offer?sku=${EBAY_SKU}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        }
+      }
+    );
+
+    if (!offerRes.data.offers?.length) {
+      return res.status(404).json({ error: "No offer found for SKU" });
+    }
+
+    const offerId = offerRes.data.offers[0].offerId;
+    console.log("🆔 Offer ID:", offerId);
+
+    /* ---------- UPDATE OFFER ---------- */
+    await axios.put(
+      `https://api.ebay.com/sell/inventory/v1/offer/${offerId}`,
+      {
+        pricingSummary: {
+          price: { value: price, currency: "GBP" }
+        },
+        availableQuantity: quantity
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    /* ---------- PUBLISH OFFER ---------- */
+    await axios.post(
+      `https://api.ebay.com/sell/inventory/v1/offer/${offerId}/publish`,
+      {},
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        }
+      }
+    );
+
+    console.log("🎉 Offer published successfully");
 
     res.json({
       success: true,
-      access_token: tokenResponse.data.access_token,
-      expires_in: tokenResponse.data.expires_in
+      sku: EBAY_SKU,
+      price,
+      quantity
     });
 
-  } catch (error) {
-    console.error(
-      "❌ Access token refresh failed:",
-      error.response?.data || error.message
-    );
-    res.status(500).json({ error: "Access token refresh failed" });
+  } catch (err) {
+    console.error("❌ Sync failed", err.response?.data || err.message);
+    res.status(500).json({ error: "Inventory sync failed" });
   }
 });
 
 /* ================================================= */
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT} (clean token state)`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
