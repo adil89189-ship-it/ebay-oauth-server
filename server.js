@@ -62,6 +62,7 @@ app.post("/oauth/exchange", async (req, res) => {
       obtained_at: Date.now(),
       expires_in
     };
+console.log("🔐 About to store refresh token");
 
     fs.writeFileSync(TOKEN_FILE, JSON.stringify(dataToStore, null, 2));
 
