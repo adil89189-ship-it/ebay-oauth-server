@@ -2,12 +2,10 @@ import express from "express";
 import axios from "axios";
 import dotenv from "dotenv";
 import fs from "fs";
-import cors from "cors";
 
 dotenv.config();
 
 const app = express();
-app.use(cors()); // 🔴 REQUIRED
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
@@ -21,11 +19,9 @@ app.get("/", (req, res) => {
 });
 
 /* =========================
-   TOKEN EXCHANGE ENDPOINT
+   STEP A — OAUTH EXCHANGE
 ========================= */
 app.post("/oauth/exchange", async (req, res) => {
-  console.log("📩 /oauth/exchange called");
-
   const { code } = req.body;
 
   if (!code) {
@@ -52,23 +48,79 @@ app.post("/oauth/exchange", async (req, res) => {
       }
     );
 
-    const { refresh_token } = tokenResponse.data;
+    const { refresh_token, expires_in } = tokenResponse.data;
 
     fs.writeFileSync(
       TOKEN_FILE,
-      JSON.stringify({ refresh_token, saved_at: new Date() }, null, 2)
+      JSON.stringify(
+        {
+          refresh_token,
+          obtained_at: Date.now(),
+          expires_in
+        },
+        null,
+        2
+      )
     );
 
     console.log("✅ REFRESH TOKEN STORED");
 
     res.json({ success: true });
 
-  } catch (err) {
-    console.error("❌ TOKEN EXCHANGE ERROR:", err.response?.data || err.message);
-    res.status(500).json({ error: "Token exchange failed" });
+  } catch (error) {
+    console.error("❌ OAuth exchange failed:", error.response?.data || error.message);
+    res.status(500).json({ error: "OAuth exchange failed" });
   }
 });
 
+/* =========================
+   STEP B — ACCESS TOKEN REFRESH
+========================= */
+app.post("/oauth/refresh", async (req, res) => {
+  if (!fs.existsSync(TOKEN_FILE)) {
+    return res.status(400).json({ error: "No refresh token stored" });
+  }
+
+  const storedData = JSON.parse(fs.readFileSync(TOKEN_FILE, "utf-8"));
+  const refreshToken = storedData.refresh_token;
+
+  try {
+    const tokenResponse = await axios.post(
+      "https://api.ebay.com/identity/v1/oauth2/token",
+      new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        scope: "https://api.ebay.com/oauth/api_scope"
+      }),
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization:
+            "Basic " +
+            Buffer.from(
+              `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
+            ).toString("base64")
+        }
+      }
+    );
+
+    const { access_token, expires_in } = tokenResponse.data;
+
+    console.log("🔑 ACCESS TOKEN GENERATED");
+
+    res.json({
+      success: true,
+      access_token,
+      expires_in
+    });
+
+  } catch (error) {
+    console.error("❌ Access token refresh failed:", error.response?.data || error.message);
+    res.status(500).json({ error: "Access token refresh failed" });
+  }
+});
+
+/* ========================= */
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
