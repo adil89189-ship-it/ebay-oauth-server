@@ -4,18 +4,22 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const EBAY_API = "https://api.ebay.com";
+
+/* =========================
+   AUTH HEADER
+========================= */
 const headers = {
   Authorization: `Bearer ${process.env.EBAY_ACCESS_TOKEN}`,
   "Content-Type": "application/json"
 };
 
 /* =========================
-   CONFIG — CHANGE THESE
+   FINAL AMAZON POLICY SET
 ========================= */
 const POLICIES = {
-  fulfillmentPolicyId: "FULFILLMENT_POLICY_ID",
-  paymentPolicyId: "PAYMENT_POLICY_ID",
-  returnPolicyId: "RETURN_POLICY_ID",
+  fulfillmentPolicyId: "251103266013",
+  paymentPolicyId: "234552183013",
+  returnPolicyId: "236141348013",
   locationKey: "WAREHOUSE"
 };
 
@@ -23,23 +27,25 @@ const POLICIES = {
    MIGRATE ONE SKU
 ========================= */
 async function migrateSku(sku) {
-  console.log("🔄 Migrating SKU:", sku);
+  console.log("🔄 Migrating Amazon SKU → eBay Inventory:", sku);
 
-  // 1️⃣ Create Inventory Item
+  /* 1️⃣ CREATE / UPDATE INVENTORY ITEM */
   await axios.put(
     `${EBAY_API}/sell/inventory/v1/inventory_item/${sku}`,
     {
+      condition: "NEW",
       availability: {
-        shipToLocationAvailability: { quantity: 10 }
-      },
-      condition: "NEW"
+        shipToLocationAvailability: {
+          quantity: 10
+        }
+      }
     },
     { headers }
   );
 
   console.log("✅ Inventory item created");
 
-  // 2️⃣ Create Offer
+  /* 2️⃣ CREATE OFFER */
   const offerRes = await axios.post(
     `${EBAY_API}/sell/inventory/v1/offer`,
     {
@@ -48,7 +54,10 @@ async function migrateSku(sku) {
       format: "FIXED_PRICE",
       availableQuantity: 10,
       pricingSummary: {
-        price: { value: "9.99", currency: "GBP" }
+        price: {
+          value: "9.99",
+          currency: "GBP"
+        }
       },
       listingPolicies: POLICIES
     },
@@ -58,25 +67,29 @@ async function migrateSku(sku) {
   const offerId = offerRes.data.offerId;
   console.log("✅ Offer created:", offerId);
 
-  // 3️⃣ Publish Offer
+  /* 3️⃣ PUBLISH OFFER */
   await axios.post(
     `${EBAY_API}/sell/inventory/v1/offer/${offerId}/publish`,
     {},
     { headers }
   );
 
-  console.log("🎉 SKU migrated successfully:", sku);
+  console.log("🎉 MIGRATION COMPLETE FOR SKU:", sku);
 }
 
 /* =========================
-   RUN MIGRATION
+   RUN
 ========================= */
 const sku = process.argv[2];
+
 if (!sku) {
   console.error("❌ Usage: node migrate-listings.js AMAZON_SKU");
   process.exit(1);
 }
 
-migrateSku(sku).catch(err =>
-  console.error("❌ Migration failed:", err.response?.data || err.message)
-);
+migrateSku(sku).catch(err => {
+  console.error(
+    "❌ Migration failed:",
+    err.response?.data || err.message
+  );
+});
