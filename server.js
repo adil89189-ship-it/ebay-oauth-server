@@ -5,6 +5,20 @@ dotenv.config();
 
 const app = express();
 app.use(express.json());
+app.get("/auth/ebay", (req, res) => {
+  const authUrl =
+    "https://auth.ebay.com/oauth2/authorize?" +
+    new URLSearchParams({
+      client_id: process.env.EBAY_CLIENT_ID,
+      response_type: "code",
+      redirect_uri: process.env.EBAY_RU_NAME,
+      scope:
+        "https://api.ebay.com/oauth/api_scope " +
+        "https://api.ebay.com/oauth/api_scope/sell.inventory"
+    }).toString();
+
+  res.redirect(authUrl);
+});
 
 const EBAY_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token";
 const EBAY_OFFER_URL = "https://api.ebay.com/sell/inventory/v1/offer";
