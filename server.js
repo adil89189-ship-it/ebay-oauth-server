@@ -1,5 +1,4 @@
 import express from "express";
-import fetch from "node-fetch";
 import cors from "cors";
 
 const app = express();
@@ -57,7 +56,6 @@ async function exchangeCode(code, res) {
       });
     }
 
-    // SUCCESS
     res.json({
       accessToken: data.access_token,
       refreshToken: data.refresh_token,
@@ -73,19 +71,17 @@ async function exchangeCode(code, res) {
 }
 
 /* ===============================
-   POST — for extension / Postman
+   POST — extension / Postman
 ================================ */
 app.post("/oauth/exchange", async (req, res) => {
-  const { code } = req.body;
-  await exchangeCode(code, res);
+  await exchangeCode(req.body.code, res);
 });
 
 /* ===============================
-   GET — for browser testing
+   GET — browser testing
 ================================ */
 app.get("/oauth/exchange", async (req, res) => {
-  const { code } = req.query;
-  await exchangeCode(code, res);
+  await exchangeCode(req.query.code, res);
 });
 
 /* ===============================
