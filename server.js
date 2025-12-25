@@ -6,75 +6,106 @@ app.use(cors());
 app.use(express.json());
 
 /* ===============================
-   ENV
-================================ */
-const {
-  EBAY_USER_TOKEN,
-  EBAY_APP_ID,
-  EBAY_DEV_ID,
-  EBAY_CERT_ID
-} = process.env;
-
-/* ===============================
    HEALTH
 ================================ */
 app.get("/", (req, res) => {
-  res.json({ ok: true, message: "eBay Trading API Server Running" });
+  res.json({ ok: true, message: "eBay Inventory API Server Running" });
 });
 
 /* ===============================
-   DEBUG ENV
+   UPDATE EBAY INVENTORY (OAUTH)
 ================================ */
-app.get("/debug-env", (req, res) => {
-  res.json({
-    hasUserToken: !!EBAY_USER_TOKEN,
-    hasAppId: !!EBAY_APP_ID,
-    hasDevId: !!EBAY_DEV_ID,
-    hasCertId: !!EBAY_CERT_ID
-  });
-});
+app.post("/ebay/update-inventory", async (req, res) => {
+  const { sku, price, quantity, accessToken } = req.body;
 
-/* ===============================
-   VERIFY EBAY TOKEN (Trading API)
-================================ */
-app.get("/verify-ebay-token", async (req, res) => {
-  if (!EBAY_USER_TOKEN || !EBAY_APP_ID || !EBAY_DEV_ID || !EBAY_CERT_ID) {
-    return res.status(500).json({
+  if (!sku || price == null || quantity == null || !accessToken) {
+    return res.status(400).json({
       ok: false,
-      error: "Missing eBay credentials"
+      error: "Missing sku, price, quantity, or accessToken"
     });
   }
 
-  const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
-<GeteBayOfficialTimeRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${EBAY_USER_TOKEN}</eBayAuthToken>
-  </RequesterCredentials>
-</GeteBayOfficialTimeRequest>`;
-
   try {
-    const response = await fetch("https://api.ebay.com/ws/api.dll", {
-      method: "POST",
-      headers: {
-        "Content-Type": "text/xml",
-        "Accept": "text/xml",
-        "User-Agent": "WareCollection-TradingAPI/1.0",
-        "Connection": "close",
+    /* 1️⃣ Update quantity */
+    const qtyRes = await fetch(
+      `https://api.ebay.com/sell/inventory/v1/inventory_item/${sku}`,
+      {
+        method: "PUT",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          availability: {
+            shipToLocationAvailability: { quantity }
+          }
+        })
+      }
+    );
 
-        "X-EBAY-API-CALL-NAME": "GeteBayOfficialTime",
-        "X-EBAY-API-SITEID": "0",
-        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
-        "X-EBAY-API-APP-NAME": EBAY_APP_ID,
-        "X-EBAY-API-DEV-NAME": EBAY_DEV_ID,
-        "X-EBAY-API-CERT-NAME": EBAY_CERT_ID
-      },
-      body: xmlBody
+    if (!qtyRes.ok) {
+      return res.status(400).json({
+        ok: false,
+        stage: "quantity",
+        ebay: await qtyRes.text()
+      });
+    }
+
+    /* 2️⃣ Get offerId */
+    const offerRes = await fetch(
+      `https://api.ebay.com/sell/inventory/v1/offer?sku=${sku}`,
+      {
+        headers: {
+          "Authorization": `Bearer ${accessToken}`
+        }
+      }
+    );
+
+    const offerData = await offerRes.json();
+    if (!offerData.offers?.length) {
+      return res.status(400).json({
+        ok: false,
+        error: "No offer found for SKU"
+      });
+    }
+
+    const offerId = offerData.offers[0].offerId;
+
+    /* 3️⃣ Update price */
+    const priceRes = await fetch(
+      `https://api.ebay.com/sell/inventory/v1/offer/${offerId}`,
+      {
+        method: "PUT",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          pricingSummary: {
+            price: {
+              value: price,
+              currency: "GBP"
+            }
+          }
+        })
+      }
+    );
+
+    if (!priceRes.ok) {
+      return res.status(400).json({
+        ok: false,
+        stage: "price",
+        ebay: await priceRes.text()
+      });
+    }
+
+    res.json({
+      ok: true,
+      message: "Inventory & price updated",
+      sku,
+      price,
+      quantity
     });
-
-    const raw = await response.text();
-
-    res.setHeader("Content-Type", "text/xml");
-    res.send(raw);
 
   } catch (err) {
     res.status(500).json({
@@ -89,5 +120,5 @@ app.get("/verify-ebay-token", async (req, res) => {
 ================================ */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Inventory server running on port ${PORT}`);
 });
