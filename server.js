@@ -2,58 +2,109 @@ import express from "express";
 import cors from "cors";
 
 const app = express();
-
-/* ===============================
-   MIDDLEWARE
-================================ */
 app.use(cors());
 app.use(express.json());
+
+const {
+  EBAY_ACCESS_TOKEN
+} = process.env;
 
 /* ===============================
    HEALTH CHECK
 ================================ */
 app.get("/", (req, res) => {
-  res.send("eBay Sync Server Running");
+  res.json({ ok: true, message: "eBay Sync Server Running" });
 });
 
 /* ===============================
-   UPDATE INVENTORY (TEST MODE)
+   UPDATE EBAY INVENTORY
 ================================ */
-app.post("/ebay/update-inventory", (req, res) => {
+app.post("/sync", async (req, res) => {
+  const { sku, price, quantity } = req.body;
+
+  if (!sku || !price || quantity === undefined) {
+    return res.status(400).json({
+      ok: false,
+      error: "Missing sku, price or quantity"
+    });
+  }
+
   try {
-    const { amazonSku, amazonPrice, quantity } = req.body;
+    /* ==========================
+       STEP 1: Get OFFER ID
+    ========================== */
+    const offerRes = await fetch(
+      `https://api.ebay.com/sell/inventory/v1/offer?sku=${sku}`,
+      {
+        headers: {
+          "Authorization": `Bearer ${EBAY_ACCESS_TOKEN}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
 
-    console.log("📥 Inventory update request received:", req.body);
+    const offerData = await offerRes.json();
 
-    if (!amazonSku || !amazonPrice) {
-      return res.status(400).json({
+    if (!offerData.offers || !offerData.offers.length) {
+      return res.status(404).json({
         ok: false,
-        error: "Missing amazonSku or amazonPrice"
+        error: "No eBay offer found for this SKU"
       });
     }
 
-    // 🚧 TEST MODE — no eBay API yet
-    return res.json({
-      ok: true,
-      message: "Inventory update accepted (test mode)",
-      received: {
-        amazonSku,
-        amazonPrice,
-        quantity
+    const offerId = offerData.offers[0].offerId;
+
+    /* ==========================
+       STEP 2: UPDATE PRICE & QTY
+    ========================== */
+    const updateRes = await fetch(
+      `https://api.ebay.com/sell/inventory/v1/offer/${offerId}`,
+      {
+        method: "PUT",
+        headers: {
+          "Authorization": `Bearer ${EBAY_ACCESS_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          availableQuantity: quantity,
+          pricingSummary: {
+            price: {
+              value: price,
+              currency: "GBP"
+            }
+          }
+        })
       }
+    );
+
+    if (!updateRes.ok) {
+      const errText = await updateRes.text();
+      return res.status(400).json({
+        ok: false,
+        error: "eBay update failed",
+        details: errText
+      });
+    }
+
+    res.json({
+      ok: true,
+      message: "eBay price & quantity updated",
+      sku,
+      price,
+      quantity
     });
 
   } catch (err) {
-    console.error("❌ Inventory update failed:", err);
     res.status(500).json({
       ok: false,
-      error: "Server error"
+      error: "Server error",
+      message: err.message
     });
   }
 });
 
 /* ===============================
-   SERVER START
+   START SERVER
 ================================ */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
