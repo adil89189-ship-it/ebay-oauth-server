@@ -1,4 +1,5 @@
 import express from "express";
+import fetch from "node-fetch";
 import cors from "cors";
 
 const app = express();
@@ -8,144 +9,133 @@ app.use(express.json());
 /* ===============================
    ENV
 ================================ */
-const EBAY_TOKEN = process.env.EBAY_USER_TOKEN;
-const EBAY_BASE = "https://api.ebay.com";
+const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN;
 
 /* ===============================
    HEALTH CHECK
 ================================ */
 app.get("/", (req, res) => {
-  res.json({
-    ok: true,
-    message: "eBay Sync Server Running"
-  });
+  res.send("eBay Sync Server Running");
 });
 
 /* ===============================
-   DEBUG ENV
+   SYNC ENDPOINT
 ================================ */
-app.get("/debug-env", (req, res) => {
-  res.json({
-    hasUserToken: !!EBAY_TOKEN
-  });
-});
-
-/* ===============================
-   UPDATE EBAY INVENTORY
-================================ */
-app.post("/ebay/update-inventory", async (req, res) => {
+app.post("/sync", async (req, res) => {
   try {
     const { amazonSku, amazonPrice, quantity } = req.body;
 
-    // ✅ FIXED VALIDATION
-    if (!amazonSku || amazonPrice == null || quantity == null) {
+    if (!amazonSku || !amazonPrice || !quantity || !EBAY_USER_TOKEN) {
       return res.status(400).json({
         ok: false,
-        error: "Missing amazonSku, amazonPrice, or quantity"
+        error: "Missing sku, price, quantity, or accessToken"
       });
     }
-
-    if (!EBAY_TOKEN) {
-      return res.status(500).json({
-        ok: false,
-        error: "EBAY_USER_TOKEN missing in environment"
-      });
-    }
-
-    console.log("📦 Updating SKU:", amazonSku);
 
     /* ===============================
-       1️⃣ UPDATE INVENTORY
+       INVENTORY UPDATE
     ================================ */
+    const inventoryPayload = {
+      availability: {
+        shipToLocationAvailability: {
+          quantity: Number(quantity)
+        }
+      }
+    };
+
     const inventoryRes = await fetch(
-      `${EBAY_BASE}/sell/inventory/v1/inventory_item/${amazonSku}`,
+      `https://api.ebay.com/sell/inventory/v1/inventory_item/${amazonSku}`,
       {
         method: "PUT",
         headers: {
-          "Authorization": `Bearer ${EBAY_TOKEN}`,
-          "Content-Type": "application/json"
+          "Authorization": `Bearer ${EBAY_USER_TOKEN}`,
+          "Content-Type": "application/json",
+          "Accept-Language": "en-GB"
         },
-        body: JSON.stringify({
-          availability: {
-            shipToLocationAvailability: { quantity }
-          }
-        })
+        body: JSON.stringify(inventoryPayload)
       }
     );
 
+    const inventoryText = await inventoryRes.text();
+
     if (!inventoryRes.ok) {
-      const text = await inventoryRes.text();
       return res.status(400).json({
         ok: false,
         stage: "inventory",
-        ebayError: text
+        ebayError: inventoryText
       });
     }
 
     /* ===============================
-       2️⃣ GET OFFER
+       GET OFFER ID
     ================================ */
     const offerRes = await fetch(
-      `${EBAY_BASE}/sell/inventory/v1/offer?sku=${amazonSku}`,
+      `https://api.ebay.com/sell/inventory/v1/offer?sku=${amazonSku}`,
       {
         headers: {
-          "Authorization": `Bearer ${EBAY_TOKEN}`
+          "Authorization": `Bearer ${EBAY_USER_TOKEN}`,
+          "Accept-Language": "en-GB"
         }
       }
     );
 
     const offerData = await offerRes.json();
+    const offerId = offerData.offers?.[0]?.offerId;
 
-    if (!offerData.offers || !offerData.offers.length) {
+    if (!offerId) {
       return res.status(400).json({
         ok: false,
-        error: "No offer found for this SKU"
+        stage: "offer",
+        error: "Offer ID not found"
       });
     }
 
-    const offerId = offerData.offers[0].offerId;
-
     /* ===============================
-       3️⃣ UPDATE PRICE
+       PRICE UPDATE
     ================================ */
+    const pricePayload = {
+      pricingSummary: {
+        price: {
+          value: Number(amazonPrice),
+          currency: "GBP"
+        }
+      }
+    };
+
     const priceRes = await fetch(
-      `${EBAY_BASE}/sell/inventory/v1/offer/${offerId}`,
+      `https://api.ebay.com/sell/inventory/v1/offer/${offerId}`,
       {
         method: "PUT",
         headers: {
-          "Authorization": `Bearer ${EBAY_TOKEN}`,
-          "Content-Type": "application/json"
+          "Authorization": `Bearer ${EBAY_USER_TOKEN}`,
+          "Content-Type": "application/json",
+          "Accept-Language": "en-GB"
         },
-        body: JSON.stringify({
-          pricingSummary: {
-            price: {
-              value: amazonPrice,
-              currency: "GBP"
-            }
-          }
-        })
+        body: JSON.stringify(pricePayload)
       }
     );
 
+    const priceText = await priceRes.text();
+
     if (!priceRes.ok) {
-      const text = await priceRes.text();
       return res.status(400).json({
         ok: false,
         stage: "price",
-        ebayError: text
+        ebayError: priceText
       });
     }
 
+    /* ===============================
+       SUCCESS
+    ================================ */
     res.json({
       ok: true,
       message: "Inventory & price updated",
-      amazonSku,
-      amazonPrice,
-      quantity
+      received: { amazonSku, amazonPrice, quantity }
     });
 
   } catch (err) {
-    console.error("❌ Update error:", err);
+    console.error("SERVER ERROR:", err);
     res.status(500).json({
       ok: false,
       error: err.message
@@ -156,7 +146,7 @@ app.post("/ebay/update-inventory", async (req, res) => {
 /* ===============================
    START SERVER
 ================================ */
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
