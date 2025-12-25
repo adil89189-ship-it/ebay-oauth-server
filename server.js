@@ -1,4 +1,5 @@
 import express from "express";
+import fetch from "node-fetch";
 import cors from "cors";
 
 const app = express();
@@ -19,17 +20,14 @@ app.get("/", (req, res) => {
 });
 
 /* ===============================
-   OAUTH TOKEN EXCHANGE
-   Called by extension after login
+   SHARED TOKEN EXCHANGE LOGIC
 ================================ */
-app.post("/oauth/exchange", async (req, res) => {
+async function exchangeCode(code, res) {
+  if (!code) {
+    return res.status(400).json({ error: "Authorization code missing" });
+  }
+
   try {
-    const { code } = req.body;
-
-    if (!code) {
-      return res.status(400).json({ error: "Authorization code missing" });
-    }
-
     const credentials = Buffer.from(
       `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
     ).toString("base64");
@@ -49,17 +47,6 @@ app.post("/oauth/exchange", async (req, res) => {
         })
       }
     );
-app.get("/oauth/exchange", async (req, res) => {
-  const { code } = req.query;
-
-  if (!code) {
-    return res.status(400).json({ error: "Missing code" });
-  }
-
-  // reuse your existing exchange logic
-  req.body = { code };
-  return app._router.handle(req, res);
-});
 
     const data = await response.json();
 
@@ -70,13 +57,7 @@ app.get("/oauth/exchange", async (req, res) => {
       });
     }
 
-    /*
-      data contains:
-      - access_token (expires in 2h)
-      - refresh_token (LONG-LIVED)
-      - expires_in
-    */
-
+    // SUCCESS
     res.json({
       accessToken: data.access_token,
       refreshToken: data.refresh_token,
@@ -89,6 +70,22 @@ app.get("/oauth/exchange", async (req, res) => {
       message: err.message
     });
   }
+}
+
+/* ===============================
+   POST — for extension / Postman
+================================ */
+app.post("/oauth/exchange", async (req, res) => {
+  const { code } = req.body;
+  await exchangeCode(code, res);
+});
+
+/* ===============================
+   GET — for browser testing
+================================ */
+app.get("/oauth/exchange", async (req, res) => {
+  const { code } = req.query;
+  await exchangeCode(code, res);
 });
 
 /* ===============================
