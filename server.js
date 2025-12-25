@@ -2,117 +2,74 @@ import express from "express";
 import cors from "cors";
 
 const app = express();
-
-/* ===============================
-   MIDDLEWARE
-================================ */
 app.use(cors());
 app.use(express.json());
 
 /* ===============================
    ENV
 ================================ */
-const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN;
+const EBAY_ACCESS_TOKEN = process.env.EBAY_USER_TOKEN;
 
 /* ===============================
    HEALTH CHECK
 ================================ */
 app.get("/", (req, res) => {
-  res.send("✅ eBay Sync Server Running");
+  res.json({
+    ok: true,
+    message: "eBay OAuth Server Running"
+  });
 });
 
 /* ===============================
-   VERIFY EBAY TOKEN
+   OAUTH TOKEN VERIFICATION
+   (CORRECT METHOD)
 ================================ */
 app.get("/verify-ebay-token", async (req, res) => {
+  if (!EBAY_ACCESS_TOKEN) {
+    return res.status(500).json({
+      ok: false,
+      error: "EBAY_USER_TOKEN missing"
+    });
+  }
+
   try {
     const response = await fetch(
-      "https://api.ebay.com/sell/account/v1/fulfillment_policy",
+      "https://api.ebay.com/identity/v1/user/",
       {
         method: "GET",
-        headers: new Headers({
-          Authorization: `Bearer ${EBAY_USER_TOKEN}`
-        })
-      }
-    );
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      return res.status(401).json({
-        ok: false,
-        error: data
-      });
-    }
-
-    res.json({
-      ok: true,
-      message: "Token valid",
-      result: data
-    });
-  } catch (err) {
-    res.status(500).json({
-      ok: false,
-      error: err.message
-    });
-  }
-});
-
-/* ===============================
-   INVENTORY SYNC
-================================ */
-app.post("/sync-inventory", async (req, res) => {
-  try {
-    const { sku, price, quantity } = req.body;
-
-    if (!sku || price == null || quantity == null) {
-      return res.status(400).json({
-        ok: false,
-        error: "Missing sku, price, or quantity"
-      });
-    }
-
-    const payload = {
-      availability: {
-        shipToLocationAvailability: {
-          quantity: Number(quantity)
-        }
-      },
-      pricingSummary: {
-        price: {
-          value: Number(price),
-          currency: "GBP"
-        }
-      }
-    };
-
-    const response = await fetch(
-      `https://api.ebay.com/sell/inventory/v1/inventory_item/${sku}`,
-      {
-        method: "PUT",
-        headers: new Headers({
-          Authorization: `Bearer ${EBAY_USER_TOKEN}`,
+        headers: {
+          Authorization: `Bearer ${EBAY_ACCESS_TOKEN}`,
           "Content-Type": "application/json"
-        }),
-        body: JSON.stringify(payload)
+        }
       }
     );
 
-    const data = await response.text();
+    const text = await response.text();
+
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      return res.status(500).json({
+        ok: false,
+        error: "Invalid JSON from eBay",
+        raw: text
+      });
+    }
 
     if (!response.ok) {
-      return res.status(400).json({
+      return res.status(response.status).json({
         ok: false,
-        stage: "inventory",
-        ebayError: data
+        ebayError: json
       });
     }
 
     res.json({
       ok: true,
-      message: "Inventory update accepted",
-      received: { sku, price, quantity }
+      message: "OAuth token is VALID",
+      ebayUser: json
     });
+
   } catch (err) {
     res.status(500).json({
       ok: false,
@@ -122,9 +79,9 @@ app.post("/sync-inventory", async (req, res) => {
 });
 
 /* ===============================
-   SERVER START
+   START SERVER
 ================================ */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🟢 Server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
