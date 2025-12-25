@@ -26,6 +26,18 @@ app.get("/", (req, res) => {
 });
 
 /* ===============================
+   DEBUG ENV (SAFE)
+================================ */
+app.get("/debug-env", (req, res) => {
+  res.json({
+    hasUserToken: !!EBAY_USER_TOKEN,
+    hasAppId: !!EBAY_APP_ID,
+    hasDevId: !!EBAY_DEV_ID,
+    hasCertId: !!EBAY_CERT_ID
+  });
+});
+
+/* ===============================
    VERIFY EBAY TOKEN (Trading API)
 ================================ */
 app.get("/verify-ebay-token", async (req, res) => {
