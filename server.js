@@ -6,10 +6,13 @@ app.use(cors());
 app.use(express.json());
 
 /* ===============================
-   HEALTH
+   HEALTH CHECK
 ================================ */
 app.get("/", (req, res) => {
-  res.json({ ok: true, message: "eBay Inventory API Server Running" });
+  res.json({
+    ok: true,
+    message: "eBay Inventory OAuth Server Running"
+  });
 });
 
 /* ===============================
@@ -18,7 +21,7 @@ app.get("/", (req, res) => {
 app.post("/ebay/update-inventory", async (req, res) => {
   const { sku, price, quantity, accessToken } = req.body;
 
-  if (!sku || price == null || quantity == null || !accessToken) {
+  if (!sku || price === undefined || quantity === undefined || !accessToken) {
     return res.status(400).json({
       ok: false,
       error: "Missing sku, price, quantity, or accessToken"
@@ -26,8 +29,10 @@ app.post("/ebay/update-inventory", async (req, res) => {
   }
 
   try {
-    /* 1️⃣ Update quantity */
-    const qtyRes = await fetch(
+    /* ===============================
+       1️⃣ UPDATE QUANTITY
+    ================================ */
+    const qtyResponse = await fetch(
       `https://api.ebay.com/sell/inventory/v1/inventory_item/${sku}`,
       {
         method: "PUT",
@@ -37,22 +42,26 @@ app.post("/ebay/update-inventory", async (req, res) => {
         },
         body: JSON.stringify({
           availability: {
-            shipToLocationAvailability: { quantity }
+            shipToLocationAvailability: {
+              quantity: Number(quantity)
+            }
           }
         })
       }
     );
 
-    if (!qtyRes.ok) {
+    if (!qtyResponse.ok) {
       return res.status(400).json({
         ok: false,
         stage: "quantity",
-        ebay: await qtyRes.text()
+        ebayError: await qtyResponse.text()
       });
     }
 
-    /* 2️⃣ Get offerId */
-    const offerRes = await fetch(
+    /* ===============================
+       2️⃣ GET OFFER ID
+    ================================ */
+    const offerResponse = await fetch(
       `https://api.ebay.com/sell/inventory/v1/offer?sku=${sku}`,
       {
         headers: {
@@ -61,18 +70,21 @@ app.post("/ebay/update-inventory", async (req, res) => {
       }
     );
 
-    const offerData = await offerRes.json();
-    if (!offerData.offers?.length) {
+    const offerData = await offerResponse.json();
+
+    if (!offerData.offers || offerData.offers.length === 0) {
       return res.status(400).json({
         ok: false,
-        error: "No offer found for SKU"
+        error: "No offer found for this SKU"
       });
     }
 
     const offerId = offerData.offers[0].offerId;
 
-    /* 3️⃣ Update price */
-    const priceRes = await fetch(
+    /* ===============================
+       3️⃣ UPDATE PRICE
+    ================================ */
+    const priceResponse = await fetch(
       `https://api.ebay.com/sell/inventory/v1/offer/${offerId}`,
       {
         method: "PUT",
@@ -83,7 +95,7 @@ app.post("/ebay/update-inventory", async (req, res) => {
         body: JSON.stringify({
           pricingSummary: {
             price: {
-              value: price,
+              value: Number(price),
               currency: "GBP"
             }
           }
@@ -91,23 +103,27 @@ app.post("/ebay/update-inventory", async (req, res) => {
       }
     );
 
-    if (!priceRes.ok) {
+    if (!priceResponse.ok) {
       return res.status(400).json({
         ok: false,
         stage: "price",
-        ebay: await priceRes.text()
+        ebayError: await priceResponse.text()
       });
     }
 
+    /* ===============================
+       SUCCESS
+    ================================ */
     res.json({
       ok: true,
-      message: "Inventory & price updated",
+      message: "Inventory and price updated successfully",
       sku,
       price,
       quantity
     });
 
   } catch (err) {
+    console.error("eBay update error:", err);
     res.status(500).json({
       ok: false,
       error: err.message
@@ -116,9 +132,9 @@ app.post("/ebay/update-inventory", async (req, res) => {
 });
 
 /* ===============================
-   START
+   START SERVER
 ================================ */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Inventory server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
