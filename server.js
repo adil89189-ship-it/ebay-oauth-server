@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 
-const app = express(); // ✅ app defined BEFORE use
+const app = express();
 
 /* ===============================
    MIDDLEWARE
@@ -15,39 +15,60 @@ app.use(express.json());
 const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN;
 
 /* ===============================
-   HEALTH CHECK
+   ROOT / HEALTH CHECK
 ================================ */
 app.get("/", (req, res) => {
-  res.send("eBay Sync Server Running");
+  res.send("eBay OAuth Server Running");
 });
 
 /* ===============================
-   VERIFY EBAY TOKEN (NO XML)
+   VERIFY EBAY TOKEN (CORRECT)
+   Uses Account Privilege API
 ================================ */
 app.get("/verify-ebay-token", async (req, res) => {
   if (!EBAY_USER_TOKEN) {
-    return res.status(500).json({ error: "EBAY_USER_TOKEN missing" });
+    return res.status(500).json({
+      ok: false,
+      error: "EBAY_USER_TOKEN missing"
+    });
   }
 
   try {
-    const response = await fetch("https://api.ebay.com/sell/inventory/v1/inventory_item", {
-      headers: {
-        Authorization: `Bearer ${EBAY_USER_TOKEN}`,
-        "Content-Type": "application/json"
+    const response = await fetch(
+      "https://api.ebay.com/sell/account/v1/privilege",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${EBAY_USER_TOKEN}`,
+          "Content-Type": "application/json"
+        }
       }
-    });
+    );
+
+    const body = await response.text();
 
     res.json({
       ok: response.ok,
-      status: response.status
+      status: response.status,
+      body
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({
+      ok: false,
+      error: err.message
+    });
   }
 });
 
 /* ===============================
-   START SERVER
+   404 HANDLER
+================================ */
+app.use((req, res) => {
+  res.status(404).send("Route not found");
+});
+
+/* ===============================
+   START SERVER (RENDER)
 ================================ */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
