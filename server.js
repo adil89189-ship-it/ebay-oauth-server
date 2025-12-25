@@ -22,6 +22,44 @@ app.post("/oauth/exchange", async (req, res) => {
   try {
     const tokenRes = await fetch(
       "https://api.ebay.com/identity/v1/oauth2/token",
+      app.post("/update-ebay-item", async (req, res) => {
+  const { itemId, price, quantity } = req.body;
+
+  if (!itemId || price == null || quantity == null) {
+    return res.status(400).json({ error: "Missing itemId, price or quantity" });
+  }
+
+  try {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <ItemID>${itemId}</ItemID>
+    <StartPrice>${price}</StartPrice>
+    <Quantity>${quantity}</Quantity>
+  </Item>
+</ReviseItemRequest>`;
+
+    const response = await fetch("https://api.ebay.com/ws/api.dll", {
+      method: "POST",
+      headers: {
+        "Content-Type": "text/xml",
+        "X-EBAY-API-CALL-NAME": "ReviseItem",
+        "X-EBAY-API-SITEID": "3",
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "967"
+      },
+      body: xml
+    });
+
+    const text = await response.text();
+    res.json({ success: true, ebayResponse: text });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "eBay update failed" });
+  }
+});
       {
         method: "POST",
         headers: {
