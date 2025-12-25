@@ -6,38 +6,51 @@ app.use(cors());
 app.use(express.json());
 
 /* ===============================
-   ENV
+   ENV VARIABLES
 ================================ */
 const {
   EBAY_CLIENT_ID,
   EBAY_CLIENT_SECRET,
-  EBAY_REFRESH_TOKEN,
-  EBAY_ENV
+  EBAY_REFRESH_TOKEN
 } = process.env;
 
+/* ===============================
+   TOKEN CACHE
+================================ */
 let EBAY_ACCESS_TOKEN = null;
 let TOKEN_EXPIRES_AT = 0;
 
 /* ===============================
-   EBAY OAUTH TOKEN REFRESH
+   REFRESH EBAY ACCESS TOKEN
 ================================ */
 async function refreshEbayToken() {
-  const basicAuth = Buffer.from(
-    `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
-  ).toString("base64");
+  if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET || !EBAY_REFRESH_TOKEN) {
+    throw new Error("Missing eBay OAuth environment variables");
+  }
+
+  const authHeader =
+    "Basic " +
+    Buffer.from(
+      EBAY_CLIENT_ID + ":" + EBAY_CLIENT_SECRET,
+      "utf8"
+    ).toString("base64");
 
   const response = await fetch(
     "https://api.ebay.com/identity/v1/oauth2/token",
     {
       method: "POST",
       headers: {
-        Authorization: `Basic ${basicAuth}`,
+        Authorization: authHeader,
         "Content-Type": "application/x-www-form-urlencoded"
       },
       body: new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: EBAY_REFRESH_TOKEN,
-        scope: "https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account"
+        scope: [
+          "https://api.ebay.com/oauth/api_scope",
+          "https://api.ebay.com/oauth/api_scope/sell.inventory",
+          "https://api.ebay.com/oauth/api_scope/sell.account"
+        ].join(" ")
       })
     }
   );
@@ -58,7 +71,7 @@ async function refreshEbayToken() {
    ENSURE VALID TOKEN
 ================================ */
 async function ensureValidToken() {
-  if (!EBAY_ACCESS_TOKEN || Date.now() >= TOKEN_EXPIRES_AT - 60000) {
+  if (!EBAY_ACCESS_TOKEN || Date.now() > TOKEN_EXPIRES_AT - 60000) {
     await refreshEbayToken();
   }
   return EBAY_ACCESS_TOKEN;
@@ -72,7 +85,7 @@ app.get("/", (req, res) => {
 });
 
 /* ===============================
-   VERIFY TOKEN (AUTO-REFRESH)
+   VERIFY EBAY TOKEN (AUTO REFRESH)
 ================================ */
 app.get("/verify-ebay-token", async (req, res) => {
   try {
@@ -111,7 +124,7 @@ app.use((req, res) => {
 });
 
 /* ===============================
-   START SERVER
+   START SERVER (RENDER)
 ================================ */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
