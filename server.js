@@ -16,40 +16,40 @@ app.get("/", (req, res) => {
 });
 
 /* ===============================
-   SYNC INVENTORY (MOCK – STEP 1)
+   EBAY INVENTORY UPDATE (STEP 2)
    Called by Chrome Extension
 ================================ */
-app.post("/sync", async (req, res) => {
+app.post("/ebay/update-inventory", async (req, res) => {
   try {
-    const { sku, price, quantity } = req.body;
+    const { amazonSku, amazonPrice, quantity } = req.body;
 
     // Validate input
-    if (!sku || !price || !quantity) {
+    if (!amazonSku || !amazonPrice || !quantity) {
       return res.status(400).json({
         ok: false,
-        error: "Missing sku, price, or quantity"
+        error: "Missing amazonSku, amazonPrice, or quantity"
       });
     }
 
-    console.log("📦 Sync request received:", {
-      sku,
-      price,
+    console.log("📦 Inventory update received:", {
+      amazonSku,
+      amazonPrice,
       quantity
     });
 
-    // 🔵 MOCK SUCCESS (NO EBAY API YET)
+    // 🔵 MOCK SUCCESS (EBAY API WILL BE ADDED NEXT)
     return res.json({
       ok: true,
-      message: "Mock sync successful",
+      message: "Inventory update accepted",
       received: {
-        sku,
-        price,
+        amazonSku,
+        amazonPrice,
         quantity
       }
     });
 
   } catch (err) {
-    console.error("❌ Sync error:", err);
+    console.error("❌ Inventory update error:", err);
     return res.status(500).json({
       ok: false,
       error: "Server error",
