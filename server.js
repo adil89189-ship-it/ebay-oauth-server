@@ -1,22 +1,54 @@
-app.get("/verify-ebay-token", async (req, res) => {
-  const EBAY_TOKEN = process.env.EBAY_USER_TOKEN;
+import express from "express";
+import cors from "cors";
 
-  if (!EBAY_TOKEN) {
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+/* ===============================
+   ENV
+================================ */
+const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN;
+
+/* ===============================
+   HEALTH CHECK
+================================ */
+app.get("/", (req, res) => {
+  res.json({
+    ok: true,
+    message: "eBay OAuth Server Running"
+  });
+});
+
+/* ===============================
+   DEBUG ENV (TEMP)
+================================ */
+app.get("/debug-env", (req, res) => {
+  res.json({
+    hasUserToken: !!process.env.EBAY_USER_TOKEN
+  });
+});
+
+/* ===============================
+   VERIFY EBAY TOKEN (Trading API)
+================================ */
+app.get("/verify-ebay-token", async (req, res) => {
+  if (!EBAY_USER_TOKEN) {
     return res.status(500).json({
       ok: false,
-      error: "EBAY_USER_TOKEN missing in environment variables"
+      error: "EBAY_USER_TOKEN missing"
     });
   }
 
   const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
 <GeteBayOfficialTimeRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
-    <eBayAuthToken>${EBAY_TOKEN}</eBayAuthToken>
+    <eBayAuthToken>${EBAY_USER_TOKEN}</eBayAuthToken>
   </RequesterCredentials>
 </GeteBayOfficialTimeRequest>`;
 
   try {
-    const ebayResponse = await fetch("https://api.ebay.com/ws/api.dll", {
+    const ebayRes = await fetch("https://api.ebay.com/ws/api.dll", {
       method: "POST",
       headers: {
         "Content-Type": "text/xml",
@@ -27,17 +59,24 @@ app.get("/verify-ebay-token", async (req, res) => {
       body: xmlRequest
     });
 
-    const responseText = await ebayResponse.text();
+    const text = await ebayRes.text();
 
-    // ✅ CRITICAL: force XML so browser does NOT try to parse as HTML
     res.setHeader("Content-Type", "text/xml; charset=utf-8");
-    res.status(200).send(responseText);
+    res.status(200).send(text);
 
-  } catch (error) {
-    console.error("❌ Token verification failed:", error);
+  } catch (err) {
+    console.error("❌ Verify error:", err);
     res.status(500).json({
       ok: false,
-      error: error.message
+      error: err.message
     });
   }
+});
+
+/* ===============================
+   START SERVER
+================================ */
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
