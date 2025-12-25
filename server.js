@@ -45,12 +45,16 @@ app.get("/verify-ebay-token", async (req, res) => {
         "Content-Type": "text/xml",
         "X-EBAY-API-CALL-NAME": "GeteBayOfficialTime",
         "X-EBAY-API-SITEID": "0",
-        "X-EBAY-API-COMPATIBILITY-LEVEL": "967"
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+        "User-Agent": "WareCollection-eBaySync/1.0"
       },
       body: xml
     });
 
     const text = await response.text();
+
+    // Important: return XML exactly as received
+    res.set("Content-Type", "text/xml");
     res.send(text);
 
   } catch (err) {
