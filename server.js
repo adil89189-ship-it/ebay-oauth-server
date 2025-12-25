@@ -8,7 +8,8 @@ app.use(express.json());
 const {
   EBAY_CLIENT_ID,
   EBAY_CLIENT_SECRET,
-  EBAY_RU_NAME
+  EBAY_RU_NAME,
+  EBAY_REFRESH_TOKEN
 } = process.env;
 
 /* ===============================
@@ -19,7 +20,16 @@ app.get("/", (req, res) => {
 });
 
 /* ===============================
-   SHARED TOKEN EXCHANGE LOGIC
+   HELPER: BASIC AUTH
+================================ */
+function getBasicAuth() {
+  return Buffer.from(
+    `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
+  ).toString("base64");
+}
+
+/* ===============================
+   OAUTH: AUTH CODE → TOKEN
 ================================ */
 async function exchangeCode(code, res) {
   if (!code) {
@@ -27,17 +37,13 @@ async function exchangeCode(code, res) {
   }
 
   try {
-    const credentials = Buffer.from(
-      `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
-    ).toString("base64");
-
     const response = await fetch(
       "https://api.ebay.com/identity/v1/oauth2/token",
       {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
-          "Authorization": `Basic ${credentials}`
+          "Authorization": `Basic ${getBasicAuth()}`
         },
         body: new URLSearchParams({
           grant_type: "authorization_code",
@@ -63,25 +69,68 @@ async function exchangeCode(code, res) {
     });
 
   } catch (err) {
-    res.status(500).json({
-      error: "Server error",
-      message: err.message
-    });
+    res.status(500).json({ error: err.message });
   }
 }
 
 /* ===============================
-   POST — extension / Postman
+   POST /oauth/exchange
 ================================ */
 app.post("/oauth/exchange", async (req, res) => {
   await exchangeCode(req.body.code, res);
 });
 
 /* ===============================
-   GET — browser testing
+   GET /oauth/exchange (browser)
 ================================ */
 app.get("/oauth/exchange", async (req, res) => {
   await exchangeCode(req.query.code, res);
+});
+
+/* ===============================
+   REFRESH TOKEN → ACCESS TOKEN
+================================ */
+app.get("/oauth/refresh", async (req, res) => {
+  if (!EBAY_REFRESH_TOKEN) {
+    return res.status(500).json({
+      error: "EBAY_REFRESH_TOKEN not set"
+    });
+  }
+
+  try {
+    const response = await fetch(
+      "https://api.ebay.com/identity/v1/oauth2/token",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Authorization": `Basic ${getBasicAuth()}`
+        },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: EBAY_REFRESH_TOKEN,
+          scope: "https://api.ebay.com/oauth/api_scope/sell.inventory"
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(400).json({
+        error: "Refresh token failed",
+        details: data
+      });
+    }
+
+    res.json({
+      accessToken: data.access_token,
+      expiresIn: data.expires_in
+    });
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* ===============================
