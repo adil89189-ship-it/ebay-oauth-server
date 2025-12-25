@@ -8,10 +8,12 @@ app.use(express.json());
 /* ===============================
    ENV
 ================================ */
-const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN;
-const EBAY_APP_ID = process.env.EBAY_APP_ID;
-const EBAY_DEV_ID = process.env.EBAY_DEV_ID;
-const EBAY_CERT_ID = process.env.EBAY_CERT_ID;
+const {
+  EBAY_USER_TOKEN,
+  EBAY_APP_ID,
+  EBAY_DEV_ID,
+  EBAY_CERT_ID
+} = process.env;
 
 /* ===============================
    HEALTH
@@ -39,11 +41,11 @@ app.get("/verify-ebay-token", async (req, res) => {
   if (!EBAY_USER_TOKEN || !EBAY_APP_ID || !EBAY_DEV_ID || !EBAY_CERT_ID) {
     return res.status(500).json({
       ok: false,
-      error: "Missing one or more eBay credentials"
+      error: "Missing eBay credentials"
     });
   }
 
-  const xml = `<?xml version="1.0" encoding="utf-8"?>
+  const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
 <GeteBayOfficialTimeRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
     <eBayAuthToken>${EBAY_USER_TOKEN}</eBayAuthToken>
@@ -55,6 +57,10 @@ app.get("/verify-ebay-token", async (req, res) => {
       method: "POST",
       headers: {
         "Content-Type": "text/xml",
+        "Accept": "text/xml",
+        "User-Agent": "WareCollection-TradingAPI/1.0",
+        "Connection": "close",
+
         "X-EBAY-API-CALL-NAME": "GeteBayOfficialTime",
         "X-EBAY-API-SITEID": "0",
         "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
@@ -62,14 +68,19 @@ app.get("/verify-ebay-token", async (req, res) => {
         "X-EBAY-API-DEV-NAME": EBAY_DEV_ID,
         "X-EBAY-API-CERT-NAME": EBAY_CERT_ID
       },
-      body: xml
+      body: xmlBody
     });
 
-    const text = await response.text();
-    res.type("text/xml").send(text);
+    const raw = await response.text();
+
+    res.setHeader("Content-Type", "text/xml");
+    res.send(raw);
 
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({
+      ok: false,
+      error: err.message
+    });
   }
 });
 
