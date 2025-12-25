@@ -1,3 +1,9 @@
+console.log("ENV CHECK", {
+  id: !!process.env.EBAY_CLIENT_ID,
+  secret: !!process.env.EBAY_CLIENT_SECRET,
+  refresh: !!process.env.EBAY_REFRESH_TOKEN
+});
+
 const express = require("express");
 const cors = require("cors");
 
