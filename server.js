@@ -8,25 +8,20 @@ app.use(express.json());
 /* ===============================
    ENV
 ================================ */
-const {
-  EBAY_USER_TOKEN,
-  EBAY_APP_ID,
-  EBAY_DEV_ID,
-  EBAY_CERT_ID
-} = process.env;
+const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN;
+const EBAY_APP_ID = process.env.EBAY_APP_ID;
+const EBAY_DEV_ID = process.env.EBAY_DEV_ID;
+const EBAY_CERT_ID = process.env.EBAY_CERT_ID;
 
 /* ===============================
-   HEALTH CHECK
+   HEALTH
 ================================ */
 app.get("/", (req, res) => {
-  res.json({
-    ok: true,
-    message: "eBay Trading API Server Running"
-  });
+  res.json({ ok: true, message: "eBay Trading API Server Running" });
 });
 
 /* ===============================
-   DEBUG ENV (SAFE)
+   DEBUG ENV
 ================================ */
 app.get("/debug-env", (req, res) => {
   res.json({
@@ -44,7 +39,7 @@ app.get("/verify-ebay-token", async (req, res) => {
   if (!EBAY_USER_TOKEN || !EBAY_APP_ID || !EBAY_DEV_ID || !EBAY_CERT_ID) {
     return res.status(500).json({
       ok: false,
-      error: "Missing eBay Trading API environment variables"
+      error: "Missing one or more eBay credentials"
     });
   }
 
@@ -65,23 +60,21 @@ app.get("/verify-ebay-token", async (req, res) => {
         "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
         "X-EBAY-API-APP-NAME": EBAY_APP_ID,
         "X-EBAY-API-DEV-NAME": EBAY_DEV_ID,
-        "X-EBAY-API-CERT-NAME": EBAY_CERT_ID,
-        "User-Agent": "WareCollection-eBaySync/1.0"
+        "X-EBAY-API-CERT-NAME": EBAY_CERT_ID
       },
       body: xml
     });
 
     const text = await response.text();
-    res.set("Content-Type", "text/xml");
-    res.send(text);
+    res.type("text/xml").send(text);
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 /* ===============================
-   START SERVER
+   START
 ================================ */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
