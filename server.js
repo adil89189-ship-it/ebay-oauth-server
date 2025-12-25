@@ -105,3 +105,36 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🟢 eBay sync server running on port ${PORT}`);
 });
+/* =========================
+   GET OFFER ID BY SELLER SKU
+========================= */
+app.get("/ebay/offer-id/:sku", async (req, res) => {
+  try {
+    const sellerSku = req.params.sku;
+    const token = await getAccessToken();
+
+    const response = await fetch(
+      `https://api.ebay.com/sell/inventory/v1/inventory_item/${sellerSku}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
+    );
+
+    if (!response.ok) {
+      return res.status(404).json({ error: "Inventory item not found" });
+    }
+
+    const item = await response.json();
+
+    if (!item.offerIds || !item.offerIds.length) {
+      return res.status(404).json({ error: "OfferId not found" });
+    }
+
+    res.json({ offerId: item.offerIds[0] });
+  } catch (err) {
+    console.error("❌ OfferId lookup failed:", err.message);
+    res.status(500).json({ error: "OfferId lookup failed" });
+  }
+});
