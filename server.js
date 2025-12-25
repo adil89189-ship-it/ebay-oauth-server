@@ -9,6 +9,7 @@ app.use(express.json());
    ENV
 ================================ */
 const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN;
+const EBAY_API_BASE = "https://api.ebay.com";
 
 /* ===============================
    HEALTH CHECK
@@ -21,7 +22,7 @@ app.get("/", (req, res) => {
 });
 
 /* ===============================
-   DEBUG ENV (TEMP)
+   DEBUG ENV
 ================================ */
 app.get("/debug-env", (req, res) => {
   res.json({
@@ -30,9 +31,11 @@ app.get("/debug-env", (req, res) => {
 });
 
 /* ===============================
-   VERIFY EBAY TOKEN (Trading API)
+   VERIFY OAUTH TOKEN (REST API)
+   ✅ OAuth-compatible
+   ❌ NO Trading API
 ================================ */
-app.get("/verify-ebay-token", async (req, res) => {
+app.get("/verify-oauth-token", async (req, res) => {
   if (!EBAY_USER_TOKEN) {
     return res.status(500).json({
       ok: false,
@@ -40,32 +43,143 @@ app.get("/verify-ebay-token", async (req, res) => {
     });
   }
 
-  const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
-<GeteBayOfficialTimeRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${EBAY_USER_TOKEN}</eBayAuthToken>
-  </RequesterCredentials>
-</GeteBayOfficialTimeRequest>`;
-
   try {
-    const ebayRes = await fetch("https://api.ebay.com/ws/api.dll", {
-      method: "POST",
-      headers: {
-        "Content-Type": "text/xml",
-        "X-EBAY-API-CALL-NAME": "GeteBayOfficialTime",
-        "X-EBAY-API-SITEID": "0",
-        "X-EBAY-API-COMPATIBILITY-LEVEL": "967"
-      },
-      body: xmlRequest
-    });
+    const response = await fetch(
+      `${EBAY_API_BASE}/sell/inventory/v1/inventory_item`,
+      {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${EBAY_USER_TOKEN}`,
+          "Accept": "application/json",
+          "Accept-Language": "en-GB"
+        }
+      }
+    );
 
-    const text = await ebayRes.text();
+    const text = await response.text();
 
-    res.setHeader("Content-Type", "text/xml; charset=utf-8");
-    res.status(200).send(text);
+    res.status(response.status).send(text);
 
   } catch (err) {
-    console.error("❌ Verify error:", err);
+    console.error("❌ OAuth verification failed:", err);
+    res.status(500).json({
+      ok: false,
+      error: err.message
+    });
+  }
+});
+
+/* ===============================
+   UPDATE INVENTORY + PRICE
+================================ */
+app.post("/ebay/update-inventory", async (req, res) => {
+  const { amazonSku, amazonPrice, quantity } = req.body;
+
+  if (!amazonSku || !amazonPrice || !quantity) {
+    return res.status(400).json({
+      ok: false,
+      error: "Missing amazonSku, amazonPrice, or quantity"
+    });
+  }
+
+  if (!EBAY_USER_TOKEN) {
+    return res.status(500).json({
+      ok: false,
+      error: "Missing EBAY_USER_TOKEN"
+    });
+  }
+
+  try {
+    /* 1️⃣ Update Quantity */
+    const invRes = await fetch(
+      `${EBAY_API_BASE}/sell/inventory/v1/inventory_item/${amazonSku}`,
+      {
+        method: "PUT",
+        headers: {
+          "Authorization": `Bearer ${EBAY_USER_TOKEN}`,
+          "Content-Type": "application/json",
+          "Accept-Language": "en-GB"
+        },
+        body: JSON.stringify({
+          availability: {
+            shipToLocationAvailability: {
+              quantity
+            }
+          }
+        })
+      }
+    );
+
+    const invText = await invRes.text();
+
+    if (!invRes.ok) {
+      return res.status(400).json({
+        ok: false,
+        stage: "inventory",
+        ebayError: invText
+      });
+    }
+
+    /* 2️⃣ Get Offer ID */
+    const offerRes = await fetch(
+      `${EBAY_API_BASE}/sell/inventory/v1/offer?sku=${amazonSku}`,
+      {
+        headers: {
+          "Authorization": `Bearer ${EBAY_USER_TOKEN}`,
+          "Accept-Language": "en-GB"
+        }
+      }
+    );
+
+    const offerData = await offerRes.json();
+
+    if (!offerData.offers || !offerData.offers.length) {
+      return res.status(400).json({
+        ok: false,
+        error: "No offer found for SKU"
+      });
+    }
+
+    const offerId = offerData.offers[0].offerId;
+
+    /* 3️⃣ Update Price */
+    const priceRes = await fetch(
+      `${EBAY_API_BASE}/sell/inventory/v1/offer/${offerId}`,
+      {
+        method: "PUT",
+        headers: {
+          "Authorization": `Bearer ${EBAY_USER_TOKEN}`,
+          "Content-Type": "application/json",
+          "Accept-Language": "en-GB"
+        },
+        body: JSON.stringify({
+          pricingSummary: {
+            price: {
+              value: amazonPrice,
+              currency: "GBP"
+            }
+          }
+        })
+      }
+    );
+
+    const priceText = await priceRes.text();
+
+    if (!priceRes.ok) {
+      return res.status(400).json({
+        ok: false,
+        stage: "price",
+        ebayError: priceText
+      });
+    }
+
+    res.json({
+      ok: true,
+      message: "Inventory & price updated successfully"
+    });
+
+  } catch (err) {
+    console.error("❌ Update failed:", err);
     res.status(500).json({
       ok: false,
       error: err.message
