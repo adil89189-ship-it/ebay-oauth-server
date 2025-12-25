@@ -1,99 +1,113 @@
-require("dotenv").config();
-const express = require("express");
-const axios = require("axios");
-const cors = require("cors");
+import express from "express";
+import fetch from "node-fetch";
+import fs from "fs";
+import cors from "cors";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-let REFRESH_TOKEN = null;
-
-app.get("/", (req, res) => {
-  res.send("eBay OAuth server running (secure mode)");
-});
+/* =========================
+   CONFIG
+========================= */
+const CLIENT_ID = process.env.EBAY_CLIENT_ID;
+const CLIENT_SECRET = process.env.EBAY_CLIENT_SECRET;
+const TOKEN_FILE = "./ebay_tokens.json";
 
 /* =========================
-   OAuth Exchange (SECURE)
+   TOKEN HELPERS
 ========================= */
-app.post("/exchange-token", async (req, res) => {
-  const { code } = req.body;
-  if (!code) return res.status(400).json({ error: "Missing code" });
+function saveTokens(tokens) {
+  fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokens, null, 2));
+}
 
-  try {
-    const basicAuth = Buffer.from(
-      `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
-    ).toString("base64");
-
-    const response = await axios.post(
-      "https://api.ebay.com/identity/v1/oauth2/token",
-      new URLSearchParams({
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: process.env.EBAY_RUNAME
-      }),
-      {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Authorization: `Basic ${basicAuth}`
-        }
-      }
-    );
-
-    // 🔐 STORE REFRESH TOKEN SECURELY
-    REFRESH_TOKEN = response.data.refresh_token;
-
-    console.log("✅ Refresh token stored securely");
-
-    // ❌ DO NOT return tokens to extension
-    res.json({ success: true });
-  } catch (err) {
-    console.error(err.response?.data || err.message);
-    res.status(500).json({ error: "OAuth failed" });
-  }
-});
-
-/* =========================
-   Get Access Token (Internal)
-========================= */
-async function getAccessToken() {
-  if (!REFRESH_TOKEN) throw new Error("No refresh token stored");
-
-  const basicAuth = Buffer.from(
-    `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
-  ).toString("base64");
-
-  const response = await axios.post(
-    "https://api.ebay.com/identity/v1/oauth2/token",
-    new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: REFRESH_TOKEN,
-      scope: "https://api.ebay.com/oauth/api_scope/sell.inventory"
-    }),
-    {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${basicAuth}`
-      }
-    }
-  );
-
-  return response.data.access_token;
+function loadTokens() {
+  if (!fs.existsSync(TOKEN_FILE)) return null;
+  return JSON.parse(fs.readFileSync(TOKEN_FILE));
 }
 
 /* =========================
-   TEST ENDPOINT
+   OAUTH: EXCHANGE CODE
 ========================= */
-app.get("/test-token", async (req, res) => {
+app.post("/exchange-token", async (req, res) => {
+  const { code } = req.body;
+
   try {
-    const token = await getAccessToken();
-    res.json({ token_valid: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+    const response = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization:
+          "Basic " +
+          Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64")
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: process.env.EBAY_RUNAME
+      })
+    });
+
+    const data = await response.json();
+
+    if (!data.refresh_token) {
+      return res.status(400).json({ error: "Refresh token missing" });
+    }
+
+    saveTokens(data);
+
+    res.json({
+      success: true,
+      message: "eBay connected securely"
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Token exchange failed" });
   }
 });
 
+/* =========================
+   GET FRESH ACCESS TOKEN
+========================= */
+async function getAccessToken() {
+  const tokens = loadTokens();
+  if (!tokens?.refresh_token) throw new Error("No refresh token");
+
+  const response = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization:
+        "Basic " +
+        Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64")
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: tokens.refresh_token,
+      scope: "https://api.ebay.com/oauth/api_scope/sell.inventory"
+    })
+  });
+
+  const newToken = await response.json();
+  tokens.access_token = newToken.access_token;
+  saveTokens(tokens);
+
+  return newToken.access_token;
+}
+
+/* =========================
+   HEALTH CHECK
+========================= */
+app.get("/status", (req, res) => {
+  const tokens = loadTokens();
+  res.json({
+    ebayConnected: !!tokens?.refresh_token
+  });
+});
+
+/* =========================
+   SERVER START
+========================= */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("eBay OAuth server running securely on port", PORT);
+  console.log("eBay OAuth server running on port", PORT);
 });
