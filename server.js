@@ -1,6 +1,6 @@
-import express from "express";
-import fetch from "node-fetch";
-import cors from "cors";
+const express = require("express");
+const fetch = require("node-fetch");
+const cors = require("cors");
 
 const app = express();
 app.use(cors());
@@ -9,11 +9,7 @@ app.use(express.json());
 /* ===============================
    ENV
 ================================ */
-const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN;
-
-if (!EBAY_USER_TOKEN) {
-  console.error("❌ EBAY_USER_TOKEN is missing");
-}
+const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN || "";
 
 /* ===============================
    HEALTH CHECK
@@ -36,7 +32,7 @@ app.post("/sync", async (req, res) => {
 
   if (!EBAY_USER_TOKEN) {
     return res.status(500).json({
-      error: "eBay user token not configured"
+      error: "EBAY_USER_TOKEN not configured"
     });
   }
 
