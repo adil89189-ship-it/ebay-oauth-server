@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import fetch from "node-fetch";
 
 const app = express();
 app.use(cors());
@@ -9,7 +10,6 @@ app.use(express.json());
    ENV
 ================================ */
 const EBAY_TOKEN = process.env.EBAY_USER_TOKEN;
-const EBAY_BASE = "https://api.ebay.com";
 
 /* ===============================
    HEALTH CHECK
@@ -17,128 +17,45 @@ const EBAY_BASE = "https://api.ebay.com";
 app.get("/", (req, res) => {
   res.json({
     ok: true,
-    message: "eBay Sync Server Running"
+    message: "eBay Trading API Server Running"
   });
 });
 
 /* ===============================
-   UPDATE EBAY INVENTORY (REAL)
+   VERIFY EBAY TOKEN (Trading API)
 ================================ */
-app.post("/ebay/update-inventory", async (req, res) => {
+app.get("/verify-ebay-token", async (req, res) => {
+  if (!EBAY_TOKEN) {
+    return res.status(500).json({
+      ok: false,
+      error: "EBAY_USER_TOKEN missing"
+    });
+  }
+
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GeteBayOfficialTimeRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${EBAY_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
+</GeteBayOfficialTimeRequest>`;
+
   try {
-    const { amazonSku, amazonPrice, quantity } = req.body;
-
-    if (!amazonSku || !amazonPrice || !quantity) {
-      return res.status(400).json({
-        ok: false,
-        error: "Missing amazonSku, amazonPrice, or quantity"
-      });
-    }
-
-    if (!EBAY_TOKEN) {
-      return res.status(500).json({
-        ok: false,
-        error: "Missing eBay OAuth token"
-      });
-    }
-
-    console.log("📦 Updating eBay SKU:", amazonSku);
-
-    /* ===============================
-       1️⃣ UPDATE INVENTORY ITEM
-    ================================ */
-    const inventoryRes = await fetch(
-      `${EBAY_BASE}/sell/inventory/v1/inventory_item/${amazonSku}`,
-      {
-        method: "PUT",
-        headers: {
-          "Authorization": `Bearer ${EBAY_TOKEN}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          availability: {
-            shipToLocationAvailability: {
-              quantity
-            }
-          }
-        })
-      }
-    );
-
-    if (!inventoryRes.ok) {
-      const text = await inventoryRes.text();
-      return res.status(400).json({
-        ok: false,
-        stage: "inventory",
-        ebayError: text
-      });
-    }
-
-    /* ===============================
-       2️⃣ GET OFFER ID
-    ================================ */
-    const offerRes = await fetch(
-      `${EBAY_BASE}/sell/inventory/v1/offer?sku=${amazonSku}`,
-      {
-        headers: {
-          "Authorization": `Bearer ${EBAY_TOKEN}`
-        }
-      }
-    );
-
-    const offerData = await offerRes.json();
-
-    if (!offerData.offers || !offerData.offers.length) {
-      return res.status(400).json({
-        ok: false,
-        error: "No offer found for this SKU"
-      });
-    }
-
-    const offerId = offerData.offers[0].offerId;
-
-    /* ===============================
-       3️⃣ UPDATE PRICE
-    ================================ */
-    const priceRes = await fetch(
-      `${EBAY_BASE}/sell/inventory/v1/offer/${offerId}`,
-      {
-        method: "PUT",
-        headers: {
-          "Authorization": `Bearer ${EBAY_TOKEN}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          pricingSummary: {
-            price: {
-              value: amazonPrice,
-              currency: "GBP"
-            }
-          }
-        })
-      }
-    );
-
-    if (!priceRes.ok) {
-      const text = await priceRes.text();
-      return res.status(400).json({
-        ok: false,
-        stage: "price",
-        ebayError: text
-      });
-    }
-
-    return res.json({
-      ok: true,
-      message: "Inventory & price updated successfully",
-      sku: amazonSku,
-      price: amazonPrice,
-      quantity
+    const response = await fetch("https://api.ebay.com/ws/api.dll", {
+      method: "POST",
+      headers: {
+        "Content-Type": "text/xml",
+        "X-EBAY-API-CALL-NAME": "GeteBayOfficialTime",
+        "X-EBAY-API-SITEID": "0",
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "967"
+      },
+      body: xml
     });
 
+    const text = await response.text();
+    res.send(text);
+
   } catch (err) {
-    console.error("❌ eBay update error:", err);
-    return res.status(500).json({
+    res.status(500).json({
       ok: false,
       error: err.message
     });
