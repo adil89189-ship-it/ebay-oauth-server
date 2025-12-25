@@ -8,7 +8,7 @@ app.use(bodyParser.json());
 /* 🔴 FILL THESE */
 const CLIENT_ID = "YOUR_EBAY_CLIENT_ID";
 const CLIENT_SECRET = "YOUR_EBAY_CLIENT_SECRET";
-const RU_NAME = "warecollection-warecoll-develo-b";
+const RU_NAME = "warecollection-warecoll-develo-bukuznz";
 
 /* 🔐 TEMP TOKEN STORAGE (ENOUGH FOR YOU) */
 let accessToken = "";
