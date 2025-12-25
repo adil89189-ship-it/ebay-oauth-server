@@ -1,5 +1,4 @@
 import express from "express";
-import fetch from "node-fetch";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -13,7 +12,7 @@ const EBAY_OFFER_URL = "https://api.ebay.com/sell/inventory/v1/offer";
 let refreshToken = process.env.EBAY_REFRESH_TOKEN || null;
 
 /* =========================
-   TOKEN HELPERS
+   TOKEN HELPER
 ========================= */
 async function getAccessToken() {
   if (!refreshToken) {
@@ -27,7 +26,7 @@ async function getAccessToken() {
   const res = await fetch(EBAY_TOKEN_URL, {
     method: "POST",
     headers: {
-      "Authorization": `Basic ${auth}`,
+      Authorization: `Basic ${auth}`,
       "Content-Type": "application/x-www-form-urlencoded"
     },
     body: new URLSearchParams({
@@ -45,29 +44,33 @@ async function getAccessToken() {
    OAUTH EXCHANGE
 ========================= */
 app.post("/exchange-token", async (req, res) => {
-  const { code } = req.body;
+  try {
+    const { code } = req.body;
 
-  const auth = Buffer.from(
-    `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
-  ).toString("base64");
+    const auth = Buffer.from(
+      `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
+    ).toString("base64");
 
-  const tokenRes = await fetch(EBAY_TOKEN_URL, {
-    method: "POST",
-    headers: {
-      "Authorization": `Basic ${auth}`,
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: process.env.EBAY_RUNAME
-    })
-  });
+    const tokenRes = await fetch(EBAY_TOKEN_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: process.env.EBAY_RUNAME
+      })
+    });
 
-  const data = await tokenRes.json();
-  refreshToken = data.refresh_token;
+    const data = await tokenRes.json();
+    refreshToken = data.refresh_token;
 
-  res.json({ success: true });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 /* =========================
@@ -79,16 +82,16 @@ app.get("/map-offers", async (req, res) => {
 
     const r = await fetch(EBAY_OFFER_URL, {
       headers: {
-        "Authorization": `Bearer ${token}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json"
       }
     });
 
     const data = await r.json();
-
     const mapping = {};
-    (data.offers || []).forEach(o => {
-      if (o.sku) {
+
+    (data.offers || []).forEach((o) => {
+      if (o.sku && o.offerId) {
         mapping[o.sku] = o.offerId;
       }
     });
@@ -107,18 +110,10 @@ app.post("/sync/sku", async (req, res) => {
     const { offerId, price, quantity } = req.body;
     const token = await getAccessToken();
 
-    await fetch(`${EBAY_OFFER_URL}/${offerId}/publish`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json"
-      }
-    });
-
     await fetch(`${EBAY_OFFER_URL}/${offerId}`, {
       method: "PUT",
       headers: {
-        "Authorization": `Bearer ${token}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -127,6 +122,13 @@ app.post("/sync/sku", async (req, res) => {
         },
         availableQuantity: quantity
       })
+    });
+
+    await fetch(`${EBAY_OFFER_URL}/${offerId}/publish`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
     });
 
     res.json({ success: true });
