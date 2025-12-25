@@ -1,5 +1,4 @@
 const express = require("express");
-const fetch = require("node-fetch");
 const cors = require("cors");
 
 const app = express();
@@ -14,22 +13,22 @@ app.get("/", (req, res) => {
 });
 
 /* ===============================
-   TEST ENDPOINT (NO EBAY YET)
+   TEST SYNC ENDPOINT
 ================================ */
 app.post("/sync", async (req, res) => {
   const { itemId, price, quantity } = req.body;
 
-  console.log("Received sync request:", req.body);
+  console.log("Sync request received:", req.body);
 
   if (!itemId || price == null || quantity == null) {
     return res.status(400).json({ error: "Missing fields" });
   }
 
-  // TEMP: just acknowledge request
+  // No eBay call yet — just confirm backend works
   res.json({
     success: true,
-    message: "Sync endpoint reachable",
-    received: { itemId, price, quantity }
+    message: "Backend reachable",
+    data: { itemId, price, quantity }
   });
 });
 
@@ -38,5 +37,5 @@ app.post("/sync", async (req, res) => {
 ================================ */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+  console.log("Server listening on port", PORT);
 });
