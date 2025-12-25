@@ -1,51 +1,55 @@
+const express = require("express");
+const cors = require("cors");
+
+const app = express(); // ✅ app defined BEFORE use
+
+/* ===============================
+   MIDDLEWARE
+================================ */
+app.use(cors());
+app.use(express.json());
+
+/* ===============================
+   ENV
+================================ */
+const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN;
+
+/* ===============================
+   HEALTH CHECK
+================================ */
+app.get("/", (req, res) => {
+  res.send("eBay Sync Server Running");
+});
+
+/* ===============================
+   VERIFY EBAY TOKEN (NO XML)
+================================ */
 app.get("/verify-ebay-token", async (req, res) => {
-  try {
-    if (!process.env.EBAY_USER_TOKEN) {
-      return res.status(500).json({
-        ok: false,
-        error: "EBAY_USER_TOKEN missing in environment variables"
-      });
-    }
-
-    const ebayResponse = await fetch(
-      "https://api.ebay.com/ws/api.dll",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "text/xml",
-          "X-EBAY-API-CALL-NAME": "GeteBayOfficialTime",
-          "X-EBAY-API-SITEID": "3",
-          "X-EBAY-API-COMPATIBILITY-LEVEL": "967"
-        },
-        body: `<?xml version="1.0" encoding="utf-8"?>
-<GeteBayOfficialTimeRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
-  </RequesterCredentials>
-</GeteBayOfficialTimeRequest>`
-      }
-    );
-
-    const text = await ebayResponse.text();
-
-    // ✅ FORCE response even if empty
-    if (!text || text.trim().length === 0) {
-      return res.status(502).json({
-        ok: false,
-        error: "Empty response from eBay",
-        ebayStatus: ebayResponse.status
-      });
-    }
-
-    // ✅ Send RAW XML so browser won't try to parse HTML
-    res.setHeader("Content-Type", "application/xml");
-    return res.status(200).send(text);
-
-  } catch (err) {
-    return res.status(500).json({
-      ok: false,
-      error: "Server crash",
-      message: err.message
-    });
+  if (!EBAY_USER_TOKEN) {
+    return res.status(500).json({ error: "EBAY_USER_TOKEN missing" });
   }
+
+  try {
+    const response = await fetch("https://api.ebay.com/sell/inventory/v1/inventory_item", {
+      headers: {
+        Authorization: `Bearer ${EBAY_USER_TOKEN}`,
+        "Content-Type": "application/json"
+      }
+    });
+
+    res.json({
+      ok: response.ok,
+      status: response.status
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ===============================
+   START SERVER
+================================ */
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🟢 Server running on port ${PORT}`);
 });
