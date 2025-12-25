@@ -11,6 +11,10 @@ app.use(express.json());
 ================================ */
 const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN;
 
+if (!EBAY_USER_TOKEN) {
+  console.error("❌ EBAY_USER_TOKEN is missing");
+}
+
 /* ===============================
    HEALTH CHECK
 ================================ */
@@ -25,7 +29,15 @@ app.post("/sync", async (req, res) => {
   const { itemId, price, quantity } = req.body;
 
   if (!itemId || price == null || quantity == null) {
-    return res.status(400).json({ error: "Missing itemId, price or quantity" });
+    return res.status(400).json({
+      error: "Missing itemId, price or quantity"
+    });
+  }
+
+  if (!EBAY_USER_TOKEN) {
+    return res.status(500).json({
+      error: "eBay user token not configured"
+    });
   }
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
@@ -53,11 +65,18 @@ app.post("/sync", async (req, res) => {
     });
 
     const text = await response.text();
-    console.log("eBay response:", text);
+    console.log("📦 eBay response:", text);
+
+    if (!response.ok) {
+      return res.status(500).json({
+        error: "eBay API error",
+        details: text
+      });
+    }
 
     res.json({ success: true });
   } catch (err) {
-    console.error(err);
+    console.error("❌ Sync failed:", err);
     res.status(500).json({ error: "eBay update failed" });
   }
 });
