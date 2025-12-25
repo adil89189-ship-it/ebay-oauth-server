@@ -17,55 +17,25 @@ const EBAY_API_BASE = "https://api.ebay.com";
 app.get("/", (req, res) => {
   res.json({
     ok: true,
-    message: "eBay OAuth Server Running"
+    message: "eBay OAuth Sync Server Running"
   });
 });
 
 /* ===============================
-   DEBUG ENV
-================================ */
-app.get("/debug-env", (req, res) => {
-  res.json({
-    hasUserToken: !!process.env.EBAY_USER_TOKEN
-  });
-});
-
-/* ===============================
-   VERIFY OAUTH TOKEN (REST API)
-   ✅ OAuth-compatible
-   ❌ NO Trading API
+   VERIFY OAUTH TOKEN
 ================================ */
 app.get("/verify-oauth-token", async (req, res) => {
-  if (!EBAY_USER_TOKEN) {
-    return res.status(500).json({
-      ok: false,
-      error: "EBAY_USER_TOKEN missing"
-    });
-  }
-
   try {
-    const response = await fetch(
-      `${EBAY_API_BASE}/sell/inventory/v1/inventory_item`,
-      {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${EBAY_USER_TOKEN}`,
-          "Accept": "application/json",
-          "Accept-Language": "en-GB"
-        }
+    const r = await fetch(`${EBAY_API_BASE}/sell/inventory/v1/inventory_item`, {
+      headers: {
+        Authorization: `Bearer ${EBAY_USER_TOKEN}`,
+        Accept: "application/json"
       }
-    );
-
-    const text = await response.text();
-
-    res.status(response.status).send(text);
-
-  } catch (err) {
-    console.error("❌ OAuth verification failed:", err);
-    res.status(500).json({
-      ok: false,
-      error: err.message
     });
+
+    res.status(r.status).send(await r.text());
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
@@ -75,65 +45,54 @@ app.get("/verify-oauth-token", async (req, res) => {
 app.post("/ebay/update-inventory", async (req, res) => {
   const { amazonSku, amazonPrice, quantity } = req.body;
 
-  if (!amazonSku || !amazonPrice || !quantity) {
+  if (!amazonSku || amazonPrice == null || quantity == null) {
     return res.status(400).json({
       ok: false,
       error: "Missing amazonSku, amazonPrice, or quantity"
     });
   }
 
-  if (!EBAY_USER_TOKEN) {
-    return res.status(500).json({
-      ok: false,
-      error: "Missing EBAY_USER_TOKEN"
-    });
-  }
-
   try {
-    /* 1️⃣ Update Quantity */
+    /* 1️⃣ UPDATE QUANTITY */
     const invRes = await fetch(
       `${EBAY_API_BASE}/sell/inventory/v1/inventory_item/${amazonSku}`,
       {
         method: "PUT",
         headers: {
-          "Authorization": `Bearer ${EBAY_USER_TOKEN}`,
+          Authorization: `Bearer ${EBAY_USER_TOKEN}`,
           "Content-Type": "application/json",
-          "Accept-Language": "en-GB"
+          "Content-Language": "en-GB"
         },
         body: JSON.stringify({
           availability: {
-            shipToLocationAvailability: {
-              quantity
-            }
+            shipToLocationAvailability: { quantity }
           }
         })
       }
     );
 
-    const invText = await invRes.text();
-
     if (!invRes.ok) {
       return res.status(400).json({
         ok: false,
         stage: "inventory",
-        ebayError: invText
+        ebayError: await invRes.text()
       });
     }
 
-    /* 2️⃣ Get Offer ID */
+    /* 2️⃣ GET OFFER ID */
     const offerRes = await fetch(
       `${EBAY_API_BASE}/sell/inventory/v1/offer?sku=${amazonSku}`,
       {
         headers: {
-          "Authorization": `Bearer ${EBAY_USER_TOKEN}`,
-          "Accept-Language": "en-GB"
+          Authorization: `Bearer ${EBAY_USER_TOKEN}`,
+          Accept: "application/json"
         }
       }
     );
 
     const offerData = await offerRes.json();
 
-    if (!offerData.offers || !offerData.offers.length) {
+    if (!offerData.offers?.length) {
       return res.status(400).json({
         ok: false,
         error: "No offer found for SKU"
@@ -142,17 +101,18 @@ app.post("/ebay/update-inventory", async (req, res) => {
 
     const offerId = offerData.offers[0].offerId;
 
-    /* 3️⃣ Update Price */
+    /* 3️⃣ UPDATE PRICE */
     const priceRes = await fetch(
       `${EBAY_API_BASE}/sell/inventory/v1/offer/${offerId}`,
       {
         method: "PUT",
         headers: {
-          "Authorization": `Bearer ${EBAY_USER_TOKEN}`,
+          Authorization: `Bearer ${EBAY_USER_TOKEN}`,
           "Content-Type": "application/json",
-          "Accept-Language": "en-GB"
+          "Content-Language": "en-GB"
         },
         body: JSON.stringify({
+          marketplaceId: "EBAY_GB",
           pricingSummary: {
             price: {
               value: amazonPrice,
@@ -163,23 +123,20 @@ app.post("/ebay/update-inventory", async (req, res) => {
       }
     );
 
-    const priceText = await priceRes.text();
-
     if (!priceRes.ok) {
       return res.status(400).json({
         ok: false,
         stage: "price",
-        ebayError: priceText
+        ebayError: await priceRes.text()
       });
     }
 
     res.json({
       ok: true,
-      message: "Inventory & price updated successfully"
+      message: "Inventory and price updated successfully"
     });
 
   } catch (err) {
-    console.error("❌ Update failed:", err);
     res.status(500).json({
       ok: false,
       error: err.message
