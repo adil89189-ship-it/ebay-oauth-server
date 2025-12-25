@@ -1,5 +1,4 @@
 import express from "express";
-import fetch from "node-fetch";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -43,6 +42,7 @@ async function getAccessToken() {
   const data = await response.json();
 
   if (!data.access_token) {
+    console.error(data);
     throw new Error("Failed to refresh eBay access token");
   }
 
@@ -102,6 +102,6 @@ app.get("/", (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log(`🟢 eBay sync server running on port ${PORT}`)
-);
+app.listen(PORT, () => {
+  console.log(`🟢 eBay sync server running on port ${PORT}`);
+});
