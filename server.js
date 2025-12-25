@@ -1,6 +1,5 @@
 import express from "express";
 import cors from "cors";
-import fetch from "node-fetch";
 
 const app = express();
 app.use(cors());
@@ -59,7 +58,7 @@ app.post("/ebay/update-inventory", async (req, res) => {
         body: JSON.stringify({
           availability: {
             shipToLocationAvailability: {
-              quantity: quantity
+              quantity
             }
           }
         })
@@ -129,9 +128,6 @@ app.post("/ebay/update-inventory", async (req, res) => {
       });
     }
 
-    /* ===============================
-       SUCCESS
-    ================================ */
     return res.json({
       ok: true,
       message: "Inventory & price updated successfully",
