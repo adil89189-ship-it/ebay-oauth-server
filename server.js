@@ -8,7 +8,12 @@ app.use(express.json());
 /* ===============================
    ENV
 ================================ */
-const EBAY_TOKEN = process.env.EBAY_USER_TOKEN;
+const {
+  EBAY_USER_TOKEN,
+  EBAY_APP_ID,
+  EBAY_DEV_ID,
+  EBAY_CERT_ID
+} = process.env;
 
 /* ===============================
    HEALTH CHECK
@@ -24,17 +29,17 @@ app.get("/", (req, res) => {
    VERIFY EBAY TOKEN (Trading API)
 ================================ */
 app.get("/verify-ebay-token", async (req, res) => {
-  if (!EBAY_TOKEN) {
+  if (!EBAY_USER_TOKEN || !EBAY_APP_ID || !EBAY_DEV_ID || !EBAY_CERT_ID) {
     return res.status(500).json({
       ok: false,
-      error: "EBAY_USER_TOKEN missing"
+      error: "Missing eBay Trading API environment variables"
     });
   }
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GeteBayOfficialTimeRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
-    <eBayAuthToken>${EBAY_TOKEN}</eBayAuthToken>
+    <eBayAuthToken>${EBAY_USER_TOKEN}</eBayAuthToken>
   </RequesterCredentials>
 </GeteBayOfficialTimeRequest>`;
 
@@ -46,22 +51,20 @@ app.get("/verify-ebay-token", async (req, res) => {
         "X-EBAY-API-CALL-NAME": "GeteBayOfficialTime",
         "X-EBAY-API-SITEID": "0",
         "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+        "X-EBAY-API-APP-NAME": EBAY_APP_ID,
+        "X-EBAY-API-DEV-NAME": EBAY_DEV_ID,
+        "X-EBAY-API-CERT-NAME": EBAY_CERT_ID,
         "User-Agent": "WareCollection-eBaySync/1.0"
       },
       body: xml
     });
 
     const text = await response.text();
-
-    // Important: return XML exactly as received
     res.set("Content-Type", "text/xml");
     res.send(text);
 
   } catch (err) {
-    res.status(500).json({
-      ok: false,
-      error: err.message
-    });
+    res.status(500).json({ error: err.message });
   }
 });
 
