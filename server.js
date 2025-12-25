@@ -8,7 +8,8 @@ app.use(express.json());
 /* ===============================
    ENV
 ================================ */
-const EBAY_ACCESS_TOKEN = process.env.EBAY_USER_TOKEN;
+const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN;
+const EBAY_BASE = "https://api.ebay.com";
 
 /* ===============================
    HEALTH CHECK
@@ -21,11 +22,23 @@ app.get("/", (req, res) => {
 });
 
 /* ===============================
-   OAUTH TOKEN VERIFICATION
-   (CORRECT METHOD)
+   DEBUG ENV (SAFE)
+================================ */
+app.get("/debug-env", (req, res) => {
+  res.json({
+    hasUserToken: !!process.env.EBAY_USER_TOKEN,
+    hasAppId: !!process.env.EBAY_APP_ID,
+    hasDevId: !!process.env.EBAY_DEV_ID,
+    hasCertId: !!process.env.EBAY_CERT_ID
+  });
+});
+
+/* ===============================
+   VERIFY EBAY TOKEN (CORRECT)
+   Handles 204 No Content
 ================================ */
 app.get("/verify-ebay-token", async (req, res) => {
-  if (!EBAY_ACCESS_TOKEN) {
+  if (!EBAY_USER_TOKEN) {
     return res.status(500).json({
       ok: false,
       error: "EBAY_USER_TOKEN missing"
@@ -38,40 +51,96 @@ app.get("/verify-ebay-token", async (req, res) => {
       {
         method: "GET",
         headers: {
-          Authorization: `Bearer ${EBAY_ACCESS_TOKEN}`,
-          "Content-Type": "application/json"
+          Authorization: `Bearer ${EBAY_USER_TOKEN}`
         }
       }
     );
 
+    // ✅ SUCCESS: eBay returns 204 with EMPTY body
+    if (response.status === 204) {
+      return res.json({
+        ok: true,
+        message: "OAuth token is VALID (204 No Content)"
+      });
+    }
+
+    // ❌ Any other response
     const text = await response.text();
 
-    let json;
-    try {
-      json = JSON.parse(text);
-    } catch {
-      return res.status(500).json({
-        ok: false,
-        error: "Invalid JSON from eBay",
-        raw: text
-      });
-    }
-
-    if (!response.ok) {
-      return res.status(response.status).json({
-        ok: false,
-        ebayError: json
-      });
-    }
-
-    res.json({
-      ok: true,
-      message: "OAuth token is VALID",
-      ebayUser: json
+    return res.status(response.status).json({
+      ok: false,
+      ebayStatus: response.status,
+      ebayResponse: text || "Empty response"
     });
 
   } catch (err) {
-    res.status(500).json({
+    return res.status(500).json({
+      ok: false,
+      error: err.message
+    });
+  }
+});
+
+/* ===============================
+   UPDATE EBAY INVENTORY
+================================ */
+app.post("/ebay/update-inventory", async (req, res) => {
+  try {
+    const { amazonSku, amazonPrice, quantity } = req.body;
+
+    if (!amazonSku || !amazonPrice || !quantity) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing amazonSku, amazonPrice, or quantity"
+      });
+    }
+
+    if (!EBAY_USER_TOKEN) {
+      return res.status(500).json({
+        ok: false,
+        error: "Missing EBAY_USER_TOKEN"
+      });
+    }
+
+    /* ===== UPDATE INVENTORY ===== */
+    const inventoryRes = await fetch(
+      `${EBAY_BASE}/sell/inventory/v1/inventory_item/${amazonSku}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${EBAY_USER_TOKEN}`,
+          "Content-Type": "application/json",
+          "Accept-Language": "en-GB"
+        },
+        body: JSON.stringify({
+          availability: {
+            shipToLocationAvailability: {
+              quantity
+            }
+          }
+        })
+      }
+    );
+
+    if (!inventoryRes.ok) {
+      const text = await inventoryRes.text();
+      return res.status(400).json({
+        ok: false,
+        stage: "inventory",
+        ebayError: text
+      });
+    }
+
+    return res.json({
+      ok: true,
+      message: "Inventory updated successfully",
+      sku: amazonSku,
+      price: amazonPrice,
+      quantity
+    });
+
+  } catch (err) {
+    return res.status(500).json({
       ok: false,
       error: err.message
     });
