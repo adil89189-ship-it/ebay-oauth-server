@@ -1,23 +1,16 @@
 import express from "express";
-import cors from "cors";
 import fetch from "node-fetch";
+import cors from "cors";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ===============================
-   ENV
-================================ */
 const {
   EBAY_CLIENT_ID,
   EBAY_CLIENT_SECRET,
   EBAY_RU_NAME
 } = process.env;
-
-if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET || !EBAY_RU_NAME) {
-  console.error("❌ Missing eBay environment variables");
-}
 
 /* ===============================
    HEALTH CHECK
@@ -27,7 +20,7 @@ app.get("/", (req, res) => {
 });
 
 /* ===============================
-   TOKEN EXCHANGE (AUTH CODE)
+   SHARED OAUTH EXCHANGE LOGIC
 ================================ */
 async function exchangeCode(code, res) {
   if (!code) {
@@ -44,8 +37,8 @@ async function exchangeCode(code, res) {
       {
         method: "POST",
         headers: {
-          "Authorization": `Basic ${credentials}`,
-          "Content-Type": "application/x-www-form-urlencoded"
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Authorization": `Basic ${credentials}`
         },
         body: new URLSearchParams({
           grant_type: "authorization_code",
@@ -67,8 +60,7 @@ async function exchangeCode(code, res) {
     res.json({
       accessToken: data.access_token,
       refreshToken: data.refresh_token,
-      expiresIn: data.expires_in,
-      tokenType: data.token_type
+      expiresIn: data.expires_in
     });
 
   } catch (err) {
@@ -80,9 +72,25 @@ async function exchangeCode(code, res) {
 }
 
 /* ===============================
-   REFRESH TOKEN
+   POST — OAuth Exchange (Extension)
 ================================ */
-async function refreshAccessToken(refreshToken, res) {
+app.post("/oauth/exchange", async (req, res) => {
+  await exchangeCode(req.body.code, res);
+});
+
+/* ===============================
+   GET — OAuth Exchange (Browser Test)
+================================ */
+app.get("/oauth/exchange", async (req, res) => {
+  await exchangeCode(req.query.code, res);
+});
+
+/* ===============================
+   REFRESH TOKEN ENDPOINT
+================================ */
+app.post("/oauth/refresh", async (req, res) => {
+  const { refreshToken } = req.body;
+
   if (!refreshToken) {
     return res.status(400).json({ error: "Refresh token missing" });
   }
@@ -97,8 +105,8 @@ async function refreshAccessToken(refreshToken, res) {
       {
         method: "POST",
         headers: {
-          "Authorization": `Basic ${credentials}`,
-          "Content-Type": "application/x-www-form-urlencoded"
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Authorization": `Basic ${credentials}`
         },
         body: new URLSearchParams({
           grant_type: "refresh_token",
@@ -112,15 +120,14 @@ async function refreshAccessToken(refreshToken, res) {
 
     if (!response.ok) {
       return res.status(400).json({
-        error: "Refresh token failed",
+        error: "Refresh failed",
         details: data
       });
     }
 
     res.json({
       accessToken: data.access_token,
-      expiresIn: data.expires_in,
-      tokenType: data.token_type
+      expiresIn: data.expires_in
     });
 
   } catch (err) {
@@ -129,30 +136,76 @@ async function refreshAccessToken(refreshToken, res) {
       message: err.message
     });
   }
-}
+});
 
 /* ===============================
-   ROUTES
+   EBAY PRICE & QUANTITY UPDATE
 ================================ */
+app.post("/ebay/update-inventory", async (req, res) => {
+  const {
+    accessToken,
+    sku,
+    price,
+    quantity
+  } = req.body;
 
-// AUTH CODE → TOKEN
-app.post("/oauth/exchange", async (req, res) => {
-  await exchangeCode(req.body.code, res);
-});
+  if (!accessToken || !sku || price == null || quantity == null) {
+    return res.status(400).json({
+      error: "Missing required fields"
+    });
+  }
 
-app.get("/oauth/exchange", async (req, res) => {
-  await exchangeCode(req.query.code, res);
-});
+  try {
+    const response = await fetch(
+      `https://api.ebay.com/sell/inventory/v1/inventory_item/${sku}`,
+      {
+        method: "PUT",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          availability: {
+            shipToLocationAvailability: {
+              quantity: Number(quantity)
+            }
+          },
+          price: {
+            value: Number(price),
+            currency: "GBP"
+          }
+        })
+      }
+    );
 
-// REFRESH TOKEN
-app.post("/oauth/refresh", async (req, res) => {
-  await refreshAccessToken(req.body.refreshToken, res);
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(400).json({
+        error: "Inventory update failed",
+        details: data
+      });
+    }
+
+    res.json({
+      success: true,
+      sku,
+      price,
+      quantity
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      error: "Server error",
+      message: err.message
+    });
+  }
 });
 
 /* ===============================
    START SERVER
 ================================ */
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
