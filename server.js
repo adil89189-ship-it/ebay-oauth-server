@@ -49,6 +49,17 @@ app.post("/oauth/exchange", async (req, res) => {
         })
       }
     );
+app.get("/oauth/exchange", async (req, res) => {
+  const { code } = req.query;
+
+  if (!code) {
+    return res.status(400).json({ error: "Missing code" });
+  }
+
+  // reuse your existing exchange logic
+  req.body = { code };
+  return app._router.handle(req, res);
+});
 
     const data = await response.json();
 
