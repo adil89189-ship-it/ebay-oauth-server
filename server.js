@@ -3,28 +3,36 @@ import fetch from "node-fetch";
 import dotenv from "dotenv";
 
 dotenv.config();
+
 const app = express();
 app.use(express.json());
 
-let cachedOfferMap = {}; // amazonSku -> offerId
+const EBAY_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token";
+const EBAY_OFFER_URL = "https://api.ebay.com/sell/inventory/v1/offer";
+
+let refreshToken = process.env.EBAY_REFRESH_TOKEN || null;
 
 /* =========================
-   GET EBAY ACCESS TOKEN
+   TOKEN HELPERS
 ========================= */
 async function getAccessToken() {
-  const res = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+  if (!refreshToken) {
+    throw new Error("No refresh token stored");
+  }
+
+  const auth = Buffer.from(
+    `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
+  ).toString("base64");
+
+  const res = await fetch(EBAY_TOKEN_URL, {
     method: "POST",
     headers: {
-      "Authorization":
-        "Basic " +
-        Buffer.from(
-          `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
-        ).toString("base64"),
+      "Authorization": `Basic ${auth}`,
       "Content-Type": "application/x-www-form-urlencoded"
     },
     body: new URLSearchParams({
       grant_type: "refresh_token",
-      refresh_token: process.env.EBAY_REFRESH_TOKEN,
+      refresh_token: refreshToken,
       scope: "https://api.ebay.com/oauth/api_scope/sell.inventory"
     })
   });
@@ -34,68 +42,103 @@ async function getAccessToken() {
 }
 
 /* =========================
-   BUILD SKU → OFFER MAP
+   OAUTH EXCHANGE
 ========================= */
-async function buildOfferMap() {
-  const token = await getAccessToken();
+app.post("/exchange-token", async (req, res) => {
+  const { code } = req.body;
 
-  const res = await fetch(
-    "https://api.ebay.com/sell/inventory/v1/offer?limit=200",
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      }
-    }
-  );
+  const auth = Buffer.from(
+    `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
+  ).toString("base64");
 
-  const data = await res.json();
-
-  cachedOfferMap = {};
-  (data.offers || []).forEach((o) => {
-    if (o.sku && o.offerId) {
-      cachedOfferMap[o.sku] = o.offerId;
-    }
+  const tokenRes = await fetch(EBAY_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      "Authorization": `Basic ${auth}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: process.env.EBAY_RUNAME
+    })
   });
 
-  console.log("🟢 Offer map built:", cachedOfferMap);
-}
-
-/* =========================
-   SYNC PRICE & QTY
-========================= */
-app.post("/sync/sku", async (req, res) => {
-  const { amazonSku, price, quantity } = req.body;
-
-  if (!cachedOfferMap[amazonSku]) {
-    await buildOfferMap();
-  }
-
-  const offerId = cachedOfferMap[amazonSku];
-  if (!offerId) {
-    return res.status(404).json({ error: "Offer not found" });
-  }
-
-  const token = await getAccessToken();
-
-  await fetch(
-    `https://api.ebay.com/sell/inventory/v1/offer/${offerId}`,
-    {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        pricingSummary: { price: { value: price, currency: "GBP" } },
-        availableQuantity: quantity
-      })
-    }
-  );
+  const data = await tokenRes.json();
+  refreshToken = data.refresh_token;
 
   res.json({ success: true });
 });
 
-app.listen(3000, () =>
-  console.log("🟢 eBay OAuth server running on port 3000")
-);
+/* =========================
+   MAP AMAZON SKU → OFFER ID
+========================= */
+app.get("/map-offers", async (req, res) => {
+  try {
+    const token = await getAccessToken();
+
+    const r = await fetch(EBAY_OFFER_URL, {
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      }
+    });
+
+    const data = await r.json();
+
+    const mapping = {};
+    (data.offers || []).forEach(o => {
+      if (o.sku) {
+        mapping[o.sku] = o.offerId;
+      }
+    });
+
+    res.json(mapping);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* =========================
+   SYNC PRICE & QUANTITY
+========================= */
+app.post("/sync/sku", async (req, res) => {
+  try {
+    const { offerId, price, quantity } = req.body;
+    const token = await getAccessToken();
+
+    await fetch(`${EBAY_OFFER_URL}/${offerId}/publish`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      }
+    });
+
+    await fetch(`${EBAY_OFFER_URL}/${offerId}`, {
+      method: "PUT",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        pricingSummary: {
+          price: { value: price, currency: "GBP" }
+        },
+        availableQuantity: quantity
+      })
+    });
+
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* =========================
+   START SERVER
+========================= */
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("🟢 eBay sync server running on port", PORT);
+});
