@@ -12,136 +12,148 @@ app.use(express.json());
 const {
   EBAY_CLIENT_ID,
   EBAY_CLIENT_SECRET,
-  EBAY_RU_NAME,
   EBAY_REFRESH_TOKEN,
   EBAY_ENV
 } = process.env;
 
-const EBAY_OAUTH_URL =
+const EBAY_API =
   EBAY_ENV === "production"
     ? "https://api.ebay.com"
     : "https://api.sandbox.ebay.com";
 
 /* ===============================
-   HEALTH CHECK
-================================ */
-app.get("/", (req, res) => {
-  res.send("✅ eBay Sync Server Running (OPTION A)");
-});
-
-/* ===============================
-   STEP 1: AUTH URL (ONE TIME)
-================================ */
-app.get("/oauth/start", (req, res) => {
-  const scope = encodeURIComponent(
-    "https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope"
-  );
-
-  const url = `https://www.ebay.com/identity/v1/oauth2/authorize?response_type=code&client_id=${EBAY_CLIENT_ID}&redirect_uri=${EBAY_RU_NAME}&scope=${scope}`;
-
-  res.redirect(url);
-});
-
-/* ===============================
-   STEP 2: CALLBACK
-================================ */
-app.get("/oauth/callback", async (req, res) => {
-  const { code } = req.query;
-  if (!code) return res.send("❌ Missing code");
-
-  const auth = Buffer.from(
-    `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
-  ).toString("base64");
-
-  const response = await fetch(
-    `${EBAY_OAUTH_URL}/identity/v1/oauth2/token`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${auth}`
-      },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: EBAY_RU_NAME
-      })
-    }
-  );
-
-  const data = await response.json();
-
-  if (!data.refresh_token) {
-    console.error(data);
-    return res.send("❌ Token exchange failed");
-  }
-
-  console.log("✅ SAVE THIS REFRESH TOKEN:");
-  console.log(data.refresh_token);
-
-  res.send(
-    "✅ OAuth Success. Copy refresh_token from server logs and save to Render ENV."
-  );
-});
-
-/* ===============================
-   TOKEN REFRESH (AUTO)
+   TOKEN REFRESH
 ================================ */
 async function getAccessToken() {
   const auth = Buffer.from(
     `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
   ).toString("base64");
 
-  const response = await fetch(
-    `${EBAY_OAUTH_URL}/identity/v1/oauth2/token`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${auth}`
-      },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: EBAY_REFRESH_TOKEN,
-        scope: "https://api.ebay.com/oauth/api_scope/sell.inventory"
-      })
-    }
-  );
+  const res = await fetch(`${EBAY_API}/identity/v1/oauth2/token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${auth}`
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: EBAY_REFRESH_TOKEN,
+      scope: "https://api.ebay.com/oauth/api_scope/sell.inventory"
+    })
+  });
 
-  const data = await response.json();
-
-  if (!data.access_token) {
-    throw new Error("❌ Failed to refresh eBay token");
-  }
-
+  const data = await res.json();
+  if (!data.access_token) throw new Error("Token refresh failed");
   return data.access_token;
 }
 
 /* ===============================
-   SYNC ENDPOINT (EXTENSION)
+   UPDATE INVENTORY ITEM
+================================ */
+async function updateInventoryItem(sku, quantity, accessToken) {
+  const res = await fetch(
+    `${EBAY_API}/sell/inventory/v1/inventory_item/${sku}`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        availability: {
+          shipToLocationAvailability: {
+            quantity
+          }
+        }
+      })
+    }
+  );
+
+  return res.ok;
+}
+
+/* ===============================
+   GET OFFER ID BY SKU
+================================ */
+async function getOfferId(sku, accessToken) {
+  const res = await fetch(
+    `${EBAY_API}/sell/inventory/v1/offer?sku=${sku}`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    }
+  );
+
+  const data = await res.json();
+  return data.offers?.[0]?.offerId || null;
+}
+
+/* ===============================
+   UPDATE OFFER PRICE
+================================ */
+async function updateOfferPrice(offerId, price, accessToken) {
+  const res = await fetch(
+    `${EBAY_API}/sell/inventory/v1/offer/${offerId}`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        pricingSummary: {
+          price: {
+            value: price.toFixed(2),
+            currency: "GBP"
+          }
+        }
+      })
+    }
+  );
+
+  return res.ok;
+}
+
+/* ===============================
+   SYNC ENDPOINT
 ================================ */
 app.post("/sync", async (req, res) => {
   try {
-    const { amazonSku, amazonPrice, quantity } = req.body;
+    const { amazonSku, amazonPrice, inStock } = req.body;
 
     if (!amazonSku || amazonPrice == null) {
       return res.status(400).json({ ok: false, message: "Invalid payload" });
     }
 
+    const DEFAULT_QTY = inStock ? 5 : 0;
+    const PRICE_MULTIPLIER = 1.35;
+
+    const finalPrice = amazonPrice * PRICE_MULTIPLIER;
     const accessToken = await getAccessToken();
 
-    // 🚧 Inventory update will be added NEXT STEP
-    console.log("🔄 SYNC RECEIVED", {
+    const qtyUpdated = await updateInventoryItem(
       amazonSku,
-      amazonPrice,
-      quantity,
-      accessToken: "OK"
-    });
+      DEFAULT_QTY,
+      accessToken
+    );
+
+    const offerId = await getOfferId(amazonSku, accessToken);
+    let priceUpdated = false;
+
+    if (offerId) {
+      priceUpdated = await updateOfferPrice(
+        offerId,
+        finalPrice,
+        accessToken
+      );
+    }
 
     res.json({
       ok: true,
-      message: "Sync accepted (inventory update coming next)",
-      received: { amazonSku, amazonPrice, quantity }
+      sku: amazonSku,
+      quantity: DEFAULT_QTY,
+      price: finalPrice.toFixed(2),
+      qtyUpdated,
+      priceUpdated
     });
   } catch (err) {
     console.error(err);
@@ -154,5 +166,5 @@ app.post("/sync", async (req, res) => {
 ================================ */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log("🚀 Inventory Sync Server Running");
 });
