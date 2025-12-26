@@ -22,36 +22,78 @@ const EBAY_API =
     : "https://api.sandbox.ebay.com";
 
 /* ===============================
-   TOKEN REFRESH
+   HEALTH CHECK
+================================ */
+app.get("/", (req, res) => {
+  res.send("✅ eBay Sync Server Running (Option A + Debug)");
+});
+
+/* ===============================
+   GET ACCESS TOKEN
 ================================ */
 async function getAccessToken() {
   const auth = Buffer.from(
     `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
   ).toString("base64");
 
-  const res = await fetch(`${EBAY_API}/identity/v1/oauth2/token`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${auth}`
-    },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: EBAY_REFRESH_TOKEN,
-      scope: "https://api.ebay.com/oauth/api_scope/sell.inventory"
-    })
-  });
+  const response = await fetch(
+    `${EBAY_API}/identity/v1/oauth2/token`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${auth}`
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: EBAY_REFRESH_TOKEN,
+        scope: "https://api.ebay.com/oauth/api_scope/sell.inventory"
+      })
+    }
+  );
 
-  const data = await res.json();
-  if (!data.access_token) throw new Error("Token refresh failed");
+  const data = await response.json();
+
+  if (!data.access_token) {
+    console.error("❌ TOKEN REFRESH FAILED", data);
+    throw new Error("Token refresh failed");
+  }
+
   return data.access_token;
 }
 
 /* ===============================
-   UPDATE INVENTORY ITEM
+   DEBUG INVENTORY ITEM
 ================================ */
-async function updateInventoryItem(sku, quantity, accessToken) {
-  const res = await fetch(
+app.get("/debug/inventory/:sku", async (req, res) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(
+      `${EBAY_API}/sell/inventory/v1/inventory_item/${req.params.sku}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        }
+      }
+    );
+
+    const data = await response.json();
+
+    res.json({
+      sku: req.params.sku,
+      httpStatus: response.status,
+      data
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ===============================
+   UPDATE INVENTORY QUANTITY
+================================ */
+async function updateInventoryQuantity(sku, quantity, accessToken) {
+  const response = await fetch(
     `${EBAY_API}/sell/inventory/v1/inventory_item/${sku}`,
     {
       method: "PUT",
@@ -69,21 +111,27 @@ async function updateInventoryItem(sku, quantity, accessToken) {
     }
   );
 
-  return res.ok;
+  return {
+    ok: response.ok,
+    status: response.status,
+    body: await response.json()
+  };
 }
 
 /* ===============================
-   GET OFFER ID BY SKU
+   GET OFFER ID
 ================================ */
 async function getOfferId(sku, accessToken) {
-  const res = await fetch(
+  const response = await fetch(
     `${EBAY_API}/sell/inventory/v1/offer?sku=${sku}`,
     {
-      headers: { Authorization: `Bearer ${accessToken}` }
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
     }
   );
 
-  const data = await res.json();
+  const data = await response.json();
   return data.offers?.[0]?.offerId || null;
 }
 
@@ -91,7 +139,7 @@ async function getOfferId(sku, accessToken) {
    UPDATE OFFER PRICE
 ================================ */
 async function updateOfferPrice(offerId, price, accessToken) {
-  const res = await fetch(
+  const response = await fetch(
     `${EBAY_API}/sell/inventory/v1/offer/${offerId}`,
     {
       method: "PATCH",
@@ -110,7 +158,11 @@ async function updateOfferPrice(offerId, price, accessToken) {
     }
   );
 
-  return res.ok;
+  return {
+    ok: response.ok,
+    status: response.status,
+    body: await response.json()
+  };
 }
 
 /* ===============================
@@ -121,42 +173,76 @@ app.post("/sync", async (req, res) => {
     const { amazonSku, amazonPrice, inStock } = req.body;
 
     if (!amazonSku || amazonPrice == null) {
-      return res.status(400).json({ ok: false, message: "Invalid payload" });
+      return res.status(400).json({
+        ok: false,
+        reason: "INVALID_PAYLOAD",
+        received: req.body
+      });
     }
 
     const DEFAULT_QTY = inStock ? 5 : 0;
     const PRICE_MULTIPLIER = 1.35;
-
     const finalPrice = amazonPrice * PRICE_MULTIPLIER;
+
     const accessToken = await getAccessToken();
 
-    const qtyUpdated = await updateInventoryItem(
+    /* ---- Quantity Update ---- */
+    const qtyResult = await updateInventoryQuantity(
       amazonSku,
       DEFAULT_QTY,
       accessToken
     );
 
-    const offerId = await getOfferId(amazonSku, accessToken);
-    let priceUpdated = false;
-
-    if (offerId) {
-      priceUpdated = await updateOfferPrice(
-        offerId,
-        finalPrice,
-        accessToken
-      );
+    if (!qtyResult.ok) {
+      console.error("❌ QTY UPDATE FAILED", amazonSku, qtyResult);
+      return res.json({
+        ok: false,
+        sku: amazonSku,
+        step: "quantity",
+        error: qtyResult
+      });
     }
+
+    /* ---- Price Update ---- */
+    const offerId = await getOfferId(amazonSku, accessToken);
+
+    if (!offerId) {
+      console.error("❌ OFFER NOT FOUND", amazonSku);
+      return res.json({
+        ok: false,
+        sku: amazonSku,
+        step: "price",
+        reason: "OFFER_NOT_FOUND"
+      });
+    }
+
+    const priceResult = await updateOfferPrice(
+      offerId,
+      finalPrice,
+      accessToken
+    );
+
+    if (!priceResult.ok) {
+      console.error("❌ PRICE UPDATE FAILED", amazonSku, priceResult);
+      return res.json({
+        ok: false,
+        sku: amazonSku,
+        step: "price",
+        error: priceResult
+      });
+    }
+
+    console.log("✅ SYNC SUCCESS", amazonSku);
 
     res.json({
       ok: true,
       sku: amazonSku,
       quantity: DEFAULT_QTY,
-      price: finalPrice.toFixed(2),
-      qtyUpdated,
-      priceUpdated
+      price: finalPrice.toFixed(2)
     });
+
   } catch (err) {
-    console.error(err);
+    console.error("❌ SYNC ERROR", err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -164,7 +250,7 @@ app.post("/sync", async (req, res) => {
 /* ===============================
    START SERVER
 ================================ */
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log("🚀 Inventory Sync Server Running");
+  console.log(`🚀 Server running on port ${PORT}`);
 });
