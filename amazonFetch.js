@@ -1,48 +1,46 @@
-import axios from "axios";
-import * as cheerio from "cheerio";
+import express from "express";
+import cors from "cors";
+import { fetchAmazonData } from "./amazonFetch.js";
 
-/**
- * Fetch Amazon price & availability by ASIN
- */
-export async function fetchAmazonData(asin) {
-  if (!asin) {
-    throw new Error("ASIN is required");
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const PORT = process.env.PORT || 3000;
+
+/* =========================
+   HEALTH CHECK
+========================= */
+app.get("/", (req, res) => {
+  res.send("eBay Sync Server Running ✅");
+});
+
+/* =========================
+   AMAZON TEST ROUTE
+========================= */
+app.get("/amazon/test", async (req, res) => {
+  try {
+    const { asin } = req.query;
+
+    if (!asin) {
+      return res.status(400).json({ error: "ASIN is required" });
+    }
+
+    const data = await fetchAmazonData(asin);
+    res.json({ ok: true, data });
+
+  } catch (err) {
+    console.error("Amazon fetch error:", err.message);
+    res.status(500).json({
+      ok: false,
+      error: err.message,
+    });
   }
+});
 
-  const url = `https://www.amazon.co.uk/dp/${asin}`;
-
-  const headers = {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-    "Accept-Language": "en-GB,en;q=0.9",
-  };
-
-  const response = await axios.get(url, {
-    headers,
-    timeout: 15000,
-  });
-
-  const $ = cheerio.load(response.data);
-
-  let priceText =
-    $("#priceblock_ourprice").text() ||
-    $("#priceblock_dealprice").text() ||
-    $("span.a-price span.a-offscreen").first().text();
-
-  const availability = $("#availability span").text().trim();
-
-  if (!priceText) {
-    throw new Error("Price not found (Amazon layout or bot protection)");
-  }
-
-  const price = parseFloat(
-    priceText.replace("£", "").replace(",", "").trim()
-  );
-
-  return {
-    asin,
-    price,
-    availability,
-    fetchedAt: new Date().toISOString(),
-  };
-}
+/* =========================
+   START SERVER
+========================= */
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
