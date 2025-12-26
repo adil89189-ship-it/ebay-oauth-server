@@ -1,5 +1,4 @@
 import express from "express";
-import fetch from "node-fetch";
 import cors from "cors";
 
 const app = express();
@@ -15,14 +14,14 @@ const EBAY_CERT_ID = process.env.EBAY_CERT_ID;
 const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN;
 
 /* ===============================
-   BASIC HEALTH CHECK
+   HEALTH CHECK
 ================================ */
 app.get("/", (req, res) => {
   res.send("eBay Trading API Sync Server Running");
 });
 
 /* ===============================
-   CORE SYNC ROUTE (PRICE + QTY)
+   SYNC ROUTE (EXISTING LISTINGS)
 ================================ */
 app.post("/sync", async (req, res) => {
   try {
@@ -43,23 +42,23 @@ app.post("/sync", async (req, res) => {
     }
 
     const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
-      <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-        <RequesterCredentials>
-          <eBayAuthToken>${EBAY_USER_TOKEN}</eBayAuthToken>
-        </RequesterCredentials>
-        <InventoryStatus>
-          <ItemID>${itemId}</ItemID>
-          <StartPrice>${price}</StartPrice>
-          <Quantity>${quantity}</Quantity>
-        </InventoryStatus>
-      </ReviseInventoryStatusRequest>`;
+<ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${EBAY_USER_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
+  <InventoryStatus>
+    <ItemID>${itemId}</ItemID>
+    <StartPrice>${price}</StartPrice>
+    <Quantity>${quantity}</Quantity>
+  </InventoryStatus>
+</ReviseInventoryStatusRequest>`;
 
     const ebayRes = await fetch("https://api.ebay.com/ws/api.dll", {
       method: "POST",
       headers: {
         "Content-Type": "text/xml",
         "X-EBAY-API-CALL-NAME": "ReviseInventoryStatus",
-        "X-EBAY-API-SITEID": "3", // UK
+        "X-EBAY-API-SITEID": "3",
         "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
         "X-EBAY-API-APP-NAME": EBAY_APP_ID,
         "X-EBAY-API-DEV-NAME": EBAY_DEV_ID,
