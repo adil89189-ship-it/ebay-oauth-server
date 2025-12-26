@@ -14,8 +14,10 @@ const {
   EBAY_RUNAME
 } = process.env;
 
+const EBAY_API_BASE = "https://api.ebay.com";
+
 /* ===============================
-   TOKEN STORAGE (DEV → STEP 2 READY)
+   TOKEN STORAGE
 ================================ */
 let ebayAccessToken = null;
 let ebayRefreshToken = null;
@@ -25,7 +27,7 @@ let tokenExpiry = 0;
    HEALTH CHECK
 ================================ */
 app.get("/", (req, res) => {
-  res.json({ ok: true, message: "eBay OAuth Server Running" });
+  res.json({ ok: true, message: "eBay OAuth + Inventory Server Running" });
 });
 
 /* ===============================
@@ -49,7 +51,6 @@ app.get("/auth/ebay", (req, res) => {
 
 /* ===============================
    OAUTH CALLBACK
-   (STEP 1: STORE REFRESH TOKEN)
 ================================ */
 app.get("/oauth/callback", async (req, res) => {
   const code = req.query.code;
@@ -98,7 +99,7 @@ app.get("/oauth/callback", async (req, res) => {
 });
 
 /* ===============================
-   STEP 2: AUTO REFRESH TOKEN
+   AUTO REFRESH TOKEN
 ================================ */
 async function getValidEbayToken() {
   if (ebayAccessToken && Date.now() < tokenExpiry - 60000) {
@@ -142,19 +143,108 @@ async function getValidEbayToken() {
 }
 
 /* ===============================
-   STEP 3: AUTHENTICATED SYNC
+   EBAY HELPERS
+================================ */
+async function getOfferIdBySku(sku, token) {
+  const res = await fetch(
+    `${EBAY_API_BASE}/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`,
+    {
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+
+  const data = await res.json();
+
+  if (!data.offers || data.offers.length === 0) {
+    throw new Error("No eBay offer found for this SKU");
+  }
+
+  return data.offers[0].offerId;
+}
+
+async function updateInventoryQuantity(sku, quantity, token) {
+  const res = await fetch(
+    `${EBAY_API_BASE}/sell/inventory/v1/inventory_item/${sku}`,
+    {
+      method: "PUT",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        availability: {
+          shipToLocationAvailability: { quantity }
+        }
+      })
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+}
+
+async function updateOfferPrice(offerId, price, token) {
+  const res = await fetch(
+    `${EBAY_API_BASE}/sell/inventory/v1/offer/${offerId}`,
+    {
+      method: "PUT",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        pricingSummary: {
+          price: {
+            value: price.toFixed(2),
+            currency: "GBP"
+          }
+        }
+      })
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+}
+
+/* ===============================
+   SYNC ROUTE (REAL UPDATE)
 ================================ */
 app.post("/sync", async (req, res) => {
+  const { amazonSku, amazonPrice, quantity, multiplier = 1 } = req.body;
+
+  if (!amazonSku || amazonPrice == null || quantity == null) {
+    return res.status(400).json({
+      ok: false,
+      error: "Missing amazonSku, amazonPrice, or quantity"
+    });
+  }
+
   try {
-    await getValidEbayToken();
+    const token = await getValidEbayToken();
+
+    const ebaySku = amazonSku;
+    const finalPrice = amazonPrice * multiplier;
+
+    const offerId = await getOfferIdBySku(ebaySku, token);
+
+    await updateInventoryQuantity(ebaySku, quantity, token);
+    await updateOfferPrice(offerId, finalPrice, token);
 
     res.json({
       ok: true,
-      message: "Inventory update accepted",
-      received: req.body
+      message: "eBay inventory and price updated",
+      sku: ebaySku,
+      price: finalPrice,
+      quantity
     });
   } catch (err) {
-    res.status(401).json({
+    res.status(500).json({
       ok: false,
       error: err.message
     });
