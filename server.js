@@ -6,7 +6,7 @@ app.use(cors());
 app.use(express.json());
 
 /* ===============================
-   ENV CHECK
+   ENV
 ================================ */
 const {
   EBAY_CLIENT_ID,
@@ -14,14 +14,12 @@ const {
   EBAY_RUNAME
 } = process.env;
 
-if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET || !EBAY_RUNAME) {
-  console.error("❌ Missing eBay OAuth environment variables");
-}
-
 /* ===============================
-   TEMP TOKEN STORAGE (DEV ONLY)
+   TOKEN STORAGE (DEV → STEP 2 READY)
 ================================ */
 let ebayAccessToken = null;
+let ebayRefreshToken = null;
+let tokenExpiry = 0;
 
 /* ===============================
    HEALTH CHECK
@@ -51,15 +49,12 @@ app.get("/auth/ebay", (req, res) => {
 
 /* ===============================
    OAUTH CALLBACK
+   (STEP 1: STORE REFRESH TOKEN)
 ================================ */
 app.get("/oauth/callback", async (req, res) => {
   const code = req.query.code;
-
   if (!code) {
-    return res.status(400).json({
-      ok: false,
-      error: "No authorization code returned"
-    });
+    return res.status(400).json({ ok: false, error: "No authorization code" });
   }
 
   const basicAuth = Buffer.from(
@@ -85,44 +80,85 @@ app.get("/oauth/callback", async (req, res) => {
 
     const data = await tokenRes.json();
 
-    if (!data.access_token) {
-      return res.status(400).json({
-        ok: false,
-        error: data
-      });
+    if (!data.access_token || !data.refresh_token) {
+      return res.status(400).json({ ok: false, error: data });
     }
 
     ebayAccessToken = data.access_token;
+    ebayRefreshToken = data.refresh_token;
+    tokenExpiry = Date.now() + data.expires_in * 1000;
 
     res.json({
       ok: true,
-      message: "Authorization successful"
+      message: "Authorization successful (refresh token stored)"
     });
   } catch (err) {
-    res.status(500).json({
-      ok: false,
-      error: err.message
-    });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 /* ===============================
-   SYNC ENDPOINT
+   STEP 2: AUTO REFRESH TOKEN
 ================================ */
-app.post("/sync", (req, res) => {
-  if (!ebayAccessToken) {
-    return res.status(401).json({
-      ok: false,
-      error: "Not authenticated with eBay"
-    });
+async function getValidEbayToken() {
+  if (ebayAccessToken && Date.now() < tokenExpiry - 60000) {
+    return ebayAccessToken;
   }
 
-  // TEMP SUCCESS RESPONSE (SAFE)
-  res.json({
-    ok: true,
-    message: "Inventory update accepted",
-    received: req.body
-  });
+  if (!ebayRefreshToken) {
+    throw new Error("No refresh token available");
+  }
+
+  const basicAuth = Buffer.from(
+    `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
+  ).toString("base64");
+
+  const res = await fetch(
+    "https://api.ebay.com/identity/v1/oauth2/token",
+    {
+      method: "POST",
+      headers: {
+        "Authorization": `Basic ${basicAuth}`,
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: ebayRefreshToken,
+        scope: "https://api.ebay.com/oauth/api_scope/sell.inventory"
+      })
+    }
+  );
+
+  const data = await res.json();
+
+  if (!data.access_token) {
+    throw new Error("Failed to refresh eBay token");
+  }
+
+  ebayAccessToken = data.access_token;
+  tokenExpiry = Date.now() + data.expires_in * 1000;
+
+  return ebayAccessToken;
+}
+
+/* ===============================
+   STEP 3: AUTHENTICATED SYNC
+================================ */
+app.post("/sync", async (req, res) => {
+  try {
+    await getValidEbayToken();
+
+    res.json({
+      ok: true,
+      message: "Inventory update accepted",
+      received: req.body
+    });
+  } catch (err) {
+    res.status(401).json({
+      ok: false,
+      error: err.message
+    });
+  }
 });
 
 /* ===============================
