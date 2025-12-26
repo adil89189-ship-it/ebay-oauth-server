@@ -24,11 +24,7 @@ app.get("/", (req, res) => {
 ================================ */
 app.post("/sync", async (req, res) => {
   try {
-    const {
-      sku,              // eBay SKU
-      finalPrice,       // price after multiplier
-      availability      // "in_stock" | "out_of_stock"
-    } = req.body;
+    const { sku, finalPrice, availability } = req.body;
 
     if (!sku || !finalPrice || !availability) {
       return res.status(400).json({
@@ -40,42 +36,33 @@ app.post("/sync", async (req, res) => {
     const quantity =
       availability === "out_of_stock" ? 0 : DEFAULT_QTY;
 
-    /* ===============================
-       UPDATE PRICE
-    ================================ */
+    /* ===== PRICE UPDATE ===== */
     await fetch(
       `https://api.ebay.com/sell/inventory/v1/inventory_item/${sku}/price`,
       {
         method: "PUT",
         headers: {
-          "Authorization": `Bearer ${EBAY_OAUTH_TOKEN}`,
+          Authorization: `Bearer ${EBAY_OAUTH_TOKEN}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          price: {
-            value: finalPrice,
-            currency: "GBP"
-          }
+          price: { value: finalPrice, currency: "GBP" }
         })
       }
     );
 
-    /* ===============================
-       UPDATE QUANTITY
-    ================================ */
+    /* ===== QUANTITY UPDATE ===== */
     await fetch(
       `https://api.ebay.com/sell/inventory/v1/inventory_item/${sku}`,
       {
         method: "PUT",
         headers: {
-          "Authorization": `Bearer ${EBAY_OAUTH_TOKEN}`,
+          Authorization: `Bearer ${EBAY_OAUTH_TOKEN}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
           availability: {
-            shipToLocationAvailability: {
-              quantity
-            }
+            shipToLocationAvailability: { quantity }
           }
         })
       }
@@ -102,5 +89,5 @@ app.post("/sync", async (req, res) => {
 ================================ */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Server running on ${PORT}`);
 });
