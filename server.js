@@ -17,6 +17,10 @@ const {
   EBAY_REFRESH_TOKEN
 } = process.env;
 
+if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET || !EBAY_REDIRECT_URI) {
+  console.error("❌ Missing required environment variables");
+}
+
 const EBAY_API =
   EBAY_ENV === "production"
     ? "https://api.ebay.com"
@@ -38,14 +42,15 @@ app.get("/oauth/start", (req, res) => {
     "https://api.ebay.com/oauth/api_scope/sell.inventory"
   ].join(" ");
 
-  const url =
+  const authUrl =
     `${EBAY_API}/identity/v1/oauth2/authorize` +
     `?client_id=${EBAY_CLIENT_ID}` +
     `&response_type=code` +
     `&redirect_uri=${encodeURIComponent(EBAY_REDIRECT_URI)}` +
     `&scope=${encodeURIComponent(scopes)}`;
 
-  res.redirect(url);
+  console.log("🔗 OAuth start URL:", authUrl);
+  res.redirect(authUrl);
 });
 
 /* ===============================
@@ -53,38 +58,47 @@ app.get("/oauth/start", (req, res) => {
 ================================ */
 app.get("/oauth/callback", async (req, res) => {
   const code = req.query.code;
-  if (!code) return res.status(400).send("Missing code");
-
-  const auth = Buffer.from(
-    `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
-  ).toString("base64");
-
-  const response = await fetch(
-    `${EBAY_API}/identity/v1/oauth2/token`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${auth}`
-      },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: EBAY_REDIRECT_URI
-      })
-    }
-  );
-
-  const data = await response.json();
-  console.log("🔐 EBAY OAUTH RESULT:", data);
-
-  if (!data.refresh_token) {
-    return res.status(500).json(data);
+  if (!code) {
+    return res.status(400).send("❌ Missing authorization code");
   }
 
-  res.send(
-    "OAuth success. Refresh token printed in server logs."
-  );
+  try {
+    const auth = Buffer.from(
+      `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
+    ).toString("base64");
+
+    const response = await fetch(
+      `${EBAY_API}/identity/v1/oauth2/token`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization: `Basic ${auth}`
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: EBAY_REDIRECT_URI
+        })
+      }
+    );
+
+    const text = await response.text();
+    console.log("🔐 EBAY OAUTH RESULT:", text);
+
+    const data = JSON.parse(text);
+
+    if (!data.refresh_token) {
+      return res.status(500).json(data);
+    }
+
+    res.send(
+      "✅ OAuth success. Refresh token printed in server logs."
+    );
+  } catch (err) {
+    console.error("OAuth callback error:", err);
+    res.status(500).send("OAuth error");
+  }
 });
 
 /* ===============================
@@ -115,12 +129,14 @@ async function getAccessToken() {
   console.log("🔄 TOKEN REFRESH RESPONSE:", text);
 
   const data = JSON.parse(text);
-  if (!data.access_token) throw new Error("Token refresh failed");
+  if (!data.access_token) {
+    throw new Error("Token refresh failed");
+  }
   return data.access_token;
 }
 
 /* ===============================
-   DEBUG INVENTORY
+   DEBUG INVENTORY (TEST)
 ================================ */
 app.get("/debug/inventory/:sku", async (req, res) => {
   try {
@@ -140,6 +156,7 @@ app.get("/debug/inventory/:sku", async (req, res) => {
     const data = await r.json();
     res.json(data);
   } catch (e) {
+    console.error(e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -148,6 +165,6 @@ app.get("/debug/inventory/:sku", async (req, res) => {
    SERVER START
 ================================ */
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () =>
-  console.log("🚀 Server running on port", PORT)
-);
+app.listen(PORT, () => {
+  console.log("🚀 Server running on port", PORT);
+});
