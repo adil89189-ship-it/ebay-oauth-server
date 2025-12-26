@@ -2,13 +2,10 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 
 /**
- * Fetch Amazon UK price & availability by ASIN
- * Backend-only (no browser)
+ * Fetch Amazon UK price (Subscribe & Save preferred)
  */
 export async function fetchAmazonData(asin) {
-  if (!asin) {
-    throw new Error("ASIN is required");
-  }
+  if (!asin) throw new Error("ASIN is required");
 
   const url = `https://www.amazon.co.uk/dp/${asin}`;
 
@@ -20,49 +17,51 @@ export async function fetchAmazonData(asin) {
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         "Accept-Language": "en-GB,en;q=0.9",
         "Accept":
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
 
-        /**
-         * 🔴 CRITICAL: Force Amazon UK location + currency
-         * Without this, Amazon hides prices
-         */
+        // 🔴 Force UK + GBP
         "Cookie":
           "i18n-prefs=GBP; lc-acbuk=en_GB; ubid-acbuk=130-1234567-1234567",
       },
     });
 
-    const html = response.data;
-    const $ = cheerio.load(html);
+    const $ = cheerio.load(response.data);
 
     /**
-     * PRICE SELECTORS (fallback chain)
+     * 1️⃣ Subscribe & Save price (preferred)
      */
-    let priceText =
+    let subscribePrice =
+      $("#snsPrice .a-offscreen").first().text() ||
+      $("span#sns-base-price span.a-offscreen").first().text();
+
+    /**
+     * 2️⃣ One-time purchase price (fallback)
+     */
+    let oneTimePrice =
       $("#priceblock_ourprice").text() ||
       $("#priceblock_dealprice").text() ||
       $("#price_inside_buybox").text() ||
       $("span.a-price span.a-offscreen").first().text();
 
-    /**
-     * AVAILABILITY
-     */
-    const availability =
-      $("#availability span").text().trim() ||
-      $("div#availability").text().trim();
+    let priceText = subscribePrice || oneTimePrice;
+    let priceType = subscribePrice ? "subscribe_and_save" : "one_time";
 
     if (!priceText) {
-      throw new Error(
-        "Price not found (blocked, variation item, or delivery restriction)"
-      );
+      throw new Error("Price not found");
     }
 
     const price = parseFloat(
       priceText.replace("£", "").replace(",", "").trim()
     );
 
+    const availability =
+      $("#availability span").text().trim() ||
+      $("div#availability").text().trim();
+
     return {
       asin,
       price,
+      priceType,
       availability,
       fetchedAt: new Date().toISOString(),
     };
