@@ -3,6 +3,7 @@ import fetch from "node-fetch";
 import cors from "cors";
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
@@ -19,20 +20,26 @@ const {
    HEALTH CHECK
 ================================ */
 app.get("/", (req, res) => {
-  res.send("eBay Sync Server Running");
+  res.json({
+    ok: true,
+    message: "eBay Sync Server Running"
+  });
 });
 
 /* ===============================
    OAUTH CALLBACK
 ================================ */
 app.get("/oauth/callback", async (req, res) => {
-  const { code } = req.query;
-
-  if (!code) {
-    return res.status(400).json({ error: "Missing authorization code" });
-  }
-
   try {
+    const { code } = req.query;
+
+    if (!code) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing authorization code"
+      });
+    }
+
     const credentials = Buffer.from(
       `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
     ).toString("base64");
@@ -56,12 +63,16 @@ app.get("/oauth/callback", async (req, res) => {
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("❌ Token Exchange Failed:", data);
-      return res.status(500).json(data);
+      console.error("❌ Token exchange failed:", data);
+      return res.status(500).json({
+        ok: false,
+        error: "Token exchange failed",
+        details: data
+      });
     }
 
     /* ===============================
-       STORE TOKEN (TEMP)
+       STORE TOKEN (TEMP - MEMORY)
     ================================ */
     global.ebayToken = {
       access_token: data.access_token,
@@ -70,38 +81,56 @@ app.get("/oauth/callback", async (req, res) => {
       created_at: Date.now()
     };
 
-    console.log("✅ eBay Token Stored");
+    console.log("✅ eBay token stored in memory");
 
-    res.send(`
-      <h2>Authorization successful</h2>
-      <p>You may now close this window.</p>
-    `);
+    res.json({
+      ok: true,
+      message: "Authorization successful"
+    });
 
   } catch (err) {
-    console.error("❌ OAuth Error:", err);
-    res.status(500).json({ error: "OAuth exchange failed" });
+    console.error("❌ OAuth callback error:", err);
+    res.status(500).json({
+      ok: false,
+      error: "OAuth callback failed",
+      details: err.message
+    });
   }
 });
 
 /* ===============================
-   INVENTORY TEST ENDPOINT
+   SYNC ENDPOINT (ALWAYS JSON)
 ================================ */
 app.post("/sync", (req, res) => {
-  if (!global.ebayToken?.access_token) {
-    return res.status(401).json({ error: "Not authenticated with eBay" });
-  }
+  try {
+    if (!global.ebayToken?.access_token) {
+      return res.status(401).json({
+        ok: false,
+        error: "Not authenticated with eBay"
+      });
+    }
 
-  res.json({
-    ok: true,
-    message: "Inventory update accepted",
-    received: req.body
-  });
+    res.json({
+      ok: true,
+      message: "Inventory update accepted",
+      received: req.body
+    });
+
+  } catch (err) {
+    console.error("❌ Sync error:", err);
+    res.status(500).json({
+      ok: false,
+      error: "Sync failed",
+      details: err.message
+    });
+  }
 });
 
 /* ===============================
    SERVER START
 ================================ */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log(`🚀 Server running on port ${PORT}`)
-);
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
