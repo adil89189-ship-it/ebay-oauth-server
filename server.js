@@ -6,21 +6,23 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+/* ===============================
+   ENV VARIABLES
+================================ */
 const {
   EBAY_CLIENT_ID,
   EBAY_CLIENT_SECRET,
   EBAY_REFRESH_TOKEN,
   EBAY_ENV,
-  EBAY_RUNAME,
-  EBAY_REDIRECT_URI
+  EBAY_RUNAME
 } = process.env;
 
-if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET || !EBAY_REFRESH_TOKEN) {
-  console.error("❌ Missing required environment variables");
+if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET) {
+  console.error("❌ Missing eBay client credentials");
 }
 
 /* ===============================
-   EBAY BASE URL
+   EBAY API BASE
 ================================ */
 const EBAY_API =
   EBAY_ENV === "production"
@@ -42,20 +44,26 @@ async function getAccessToken() {
     `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
   ).toString("base64");
 
-  const res = await fetch(`${EBAY_API}/identity/v1/oauth2/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${auth}`,
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: EBAY_REFRESH_TOKEN,
-      scope: "https://api.ebay.com/oauth/api_scope"
-    })
-  });
+  const response = await fetch(
+    `${EBAY_API}/identity/v1/oauth2/token`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: EBAY_REFRESH_TOKEN,
+        scope:
+          "https://api.ebay.com/oauth/api_scope " +
+          "https://api.ebay.com/oauth/api_scope/sell.inventory " +
+          "https://api.ebay.com/oauth/api_scope/sell.account"
+      })
+    }
+  );
 
-  const data = await res.json();
+  const data = await response.json();
 
   if (!data.access_token) {
     throw new Error("Token refresh failed");
@@ -75,19 +83,81 @@ app.get("/", (req, res) => {
 });
 
 /* ===============================
+   OAUTH START (REQUEST CORRECT SCOPES)
+================================ */
+app.get("/oauth/start", (req, res) => {
+  const scope = encodeURIComponent(
+    "https://api.ebay.com/oauth/api_scope " +
+    "https://api.ebay.com/oauth/api_scope/sell.inventory " +
+    "https://api.ebay.com/oauth/api_scope/sell.account"
+  );
+
+  const authUrl =
+    "https://auth.ebay.com/oauth2/authorize" +
+    `?client_id=${EBAY_CLIENT_ID}` +
+    `&response_type=code` +
+    `&redirect_uri=${EBAY_RUNAME}` +
+    `&scope=${scope}`;
+
+  res.redirect(authUrl);
+});
+
+/* ===============================
+   OAUTH CALLBACK (ONE-TIME)
+================================ */
+app.get("/oauth/callback", async (req, res) => {
+  const code = req.query.code;
+  if (!code) {
+    return res.status(400).json({ error: "Missing authorization code" });
+  }
+
+  const auth = Buffer.from(
+    `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
+  ).toString("base64");
+
+  const response = await fetch(
+    `${EBAY_API}/identity/v1/oauth2/token`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: EBAY_RUNAME
+      })
+    }
+  );
+
+  const data = await response.json();
+
+  if (!data.refresh_token) {
+    return res.status(500).json(data);
+  }
+
+  res.json({
+    success: true,
+    message: "OAuth success — refresh token generated",
+    refresh_token: data.refresh_token
+  });
+});
+
+/* ===============================
    DEBUG TOKEN
 ================================ */
 app.get("/debug/token", async (req, res) => {
   try {
     const token = await getAccessToken();
-    res.json({ ok: true, token: token.slice(0, 25) + "..." });
+    res.json({ ok: true, token: token.slice(0, 30) + "..." });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 /* ===============================
-   DEBUG INVENTORY BY SKU
+   DEBUG INVENTORY
 ================================ */
 app.get("/debug/inventory/:sku", async (req, res) => {
   try {
