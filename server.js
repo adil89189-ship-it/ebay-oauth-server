@@ -1,137 +1,107 @@
-console.log("ENV CHECK", {
-  id: !!process.env.EBAY_CLIENT_ID,
-  secret: !!process.env.EBAY_CLIENT_SECRET,
-  refresh: !!process.env.EBAY_REFRESH_TOKEN
-});
-const express = require("express");
-const cors = require("cors");
+import express from "express";
+import fetch from "node-fetch";
+import cors from "cors";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 /* ===============================
-   ENV VARIABLES
+   ENV
 ================================ */
 const {
   EBAY_CLIENT_ID,
   EBAY_CLIENT_SECRET,
-  EBAY_REFRESH_TOKEN
+  EBAY_RU_NAME
 } = process.env;
-
-/* ===============================
-   TOKEN CACHE
-================================ */
-let EBAY_ACCESS_TOKEN = null;
-let TOKEN_EXPIRES_AT = 0;
-
-/* ===============================
-   REFRESH EBAY ACCESS TOKEN
-================================ */
-async function refreshEbayToken() {
-  if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET || !EBAY_REFRESH_TOKEN) {
-    throw new Error("Missing eBay OAuth environment variables");
-  }
-
-  const authHeader =
-    "Basic " +
-    Buffer.from(
-      EBAY_CLIENT_ID + ":" + EBAY_CLIENT_SECRET,
-      "utf8"
-    ).toString("base64");
-
-  const response = await fetch(
-    "https://api.ebay.com/identity/v1/oauth2/token",
-    {
-      method: "POST",
-      headers: {
-        Authorization: authHeader,
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: EBAY_REFRESH_TOKEN,
-        scope: [
-          "https://api.ebay.com/oauth/api_scope",
-          "https://api.ebay.com/oauth/api_scope/sell.inventory",
-          "https://api.ebay.com/oauth/api_scope/sell.account"
-        ].join(" ")
-      })
-    }
-  );
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(`Token refresh failed: ${JSON.stringify(data)}`);
-  }
-
-  EBAY_ACCESS_TOKEN = data.access_token;
-  TOKEN_EXPIRES_AT = Date.now() + data.expires_in * 1000;
-
-  console.log("🔁 eBay access token refreshed");
-}
-
-/* ===============================
-   ENSURE VALID TOKEN
-================================ */
-async function ensureValidToken() {
-  if (!EBAY_ACCESS_TOKEN || Date.now() > TOKEN_EXPIRES_AT - 60000) {
-    await refreshEbayToken();
-  }
-  return EBAY_ACCESS_TOKEN;
-}
 
 /* ===============================
    HEALTH CHECK
 ================================ */
 app.get("/", (req, res) => {
-  res.send("eBay OAuth Server Running");
+  res.send("eBay Sync Server Running");
 });
 
 /* ===============================
-   VERIFY EBAY TOKEN (AUTO REFRESH)
+   OAUTH CALLBACK
 ================================ */
-app.get("/verify-ebay-token", async (req, res) => {
+app.get("/oauth/callback", async (req, res) => {
+  const { code } = req.query;
+
+  if (!code) {
+    return res.status(400).json({ error: "Missing authorization code" });
+  }
+
   try {
-    const token = await ensureValidToken();
+    const credentials = Buffer.from(
+      `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
+    ).toString("base64");
 
     const response = await fetch(
-      "https://api.ebay.com/sell/account/v1/privilege",
+      "https://api.ebay.com/identity/v1/oauth2/token",
       {
+        method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        }
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Authorization": `Basic ${credentials}`
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: EBAY_RU_NAME
+        })
       }
     );
 
-    const body = await response.text();
+    const data = await response.json();
 
-    res.json({
-      ok: response.ok,
-      status: response.status,
-      body
-    });
+    if (!response.ok) {
+      console.error("❌ Token Exchange Failed:", data);
+      return res.status(500).json(data);
+    }
+
+    /* ===============================
+       STORE TOKEN (TEMP)
+    ================================ */
+    global.ebayToken = {
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      expires_in: data.expires_in,
+      created_at: Date.now()
+    };
+
+    console.log("✅ eBay Token Stored");
+
+    res.send(`
+      <h2>Authorization successful</h2>
+      <p>You may now close this window.</p>
+    `);
+
   } catch (err) {
-    res.status(500).json({
-      ok: false,
-      error: err.message
-    });
+    console.error("❌ OAuth Error:", err);
+    res.status(500).json({ error: "OAuth exchange failed" });
   }
 });
 
 /* ===============================
-   404 HANDLER
+   INVENTORY TEST ENDPOINT
 ================================ */
-app.use((req, res) => {
-  res.status(404).send("Route not found");
+app.post("/sync", (req, res) => {
+  if (!global.ebayToken?.access_token) {
+    return res.status(401).json({ error: "Not authenticated with eBay" });
+  }
+
+  res.json({
+    ok: true,
+    message: "Inventory update accepted",
+    received: req.body
+  });
 });
 
 /* ===============================
-   START SERVER (RENDER)
+   SERVER START
 ================================ */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🟢 Server running on port ${PORT}`);
-});
+app.listen(PORT, () =>
+  console.log(`🚀 Server running on port ${PORT}`)
+);
