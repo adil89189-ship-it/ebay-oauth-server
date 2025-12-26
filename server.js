@@ -1,44 +1,106 @@
 import express from "express";
+import fetch from "node-fetch";
 import cors from "cors";
-import { fetchAmazonData } from "./amazonFetch.js";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
 app.use(cors());
 app.use(express.json());
+
+/* ===============================
+   CONFIG
+================================ */
+const EBAY_OAUTH_TOKEN = process.env.EBAY_OAUTH_TOKEN;
+const DEFAULT_QTY = 3;
 
 /* ===============================
    HEALTH CHECK
 ================================ */
 app.get("/", (req, res) => {
-  res.send("Amazon → eBay backend running ✅");
+  res.send("🟢 eBay Sync Server Running");
 });
 
 /* ===============================
-   AMAZON TEST ROUTE
-   /amazon/test?asin=B01CZNPFCC
+   SYNC ENDPOINT
 ================================ */
-app.get("/amazon/test", async (req, res) => {
+app.post("/sync", async (req, res) => {
   try {
-    const { asin } = req.query;
+    const {
+      sku,              // eBay SKU
+      finalPrice,       // price after multiplier
+      availability      // "in_stock" | "out_of_stock"
+    } = req.body;
 
-    if (!asin) {
-      return res.status(400).json({ error: "ASIN is required" });
+    if (!sku || !finalPrice || !availability) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing sku, finalPrice or availability"
+      });
     }
 
-    const data = await fetchAmazonData(asin);
-    res.json({ ok: true, data });
+    const quantity =
+      availability === "out_of_stock" ? 0 : DEFAULT_QTY;
+
+    /* ===============================
+       UPDATE PRICE
+    ================================ */
+    await fetch(
+      `https://api.ebay.com/sell/inventory/v1/inventory_item/${sku}/price`,
+      {
+        method: "PUT",
+        headers: {
+          "Authorization": `Bearer ${EBAY_OAUTH_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          price: {
+            value: finalPrice,
+            currency: "GBP"
+          }
+        })
+      }
+    );
+
+    /* ===============================
+       UPDATE QUANTITY
+    ================================ */
+    await fetch(
+      `https://api.ebay.com/sell/inventory/v1/inventory_item/${sku}`,
+      {
+        method: "PUT",
+        headers: {
+          "Authorization": `Bearer ${EBAY_OAUTH_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          availability: {
+            shipToLocationAvailability: {
+              quantity
+            }
+          }
+        })
+      }
+    );
+
+    res.json({
+      ok: true,
+      message: "Price & quantity synced",
+      sku,
+      finalPrice,
+      quantity
+    });
 
   } catch (err) {
-    console.error("Amazon fetch error:", err.message);
     res.status(500).json({
       ok: false,
-      error: err.message,
+      error: err.message
     });
   }
 });
 
+/* ===============================
+   START SERVER
+================================ */
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🟢 Server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
