@@ -1,9 +1,32 @@
 import express from "express";
 import fetch from "node-fetch";
-import cors from "cors";
 
 const app = express();
-app.use(cors());
+
+/* ===============================
+   CORS (EXPLICIT & SAFE)
+================================ */
+app.use((req, res, next) => {
+  res.setHeader(
+    "Access-Control-Allow-Origin",
+    "chrome-extension://pdhlbpomblpglmfkikliojabdodhhgfh"
+  );
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET,POST,PUT,OPTIONS"
+  );
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization"
+  );
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
 app.use(express.json());
 
 /* ===============================
@@ -36,7 +59,7 @@ app.post("/sync", async (req, res) => {
     const quantity =
       availability === "out_of_stock" ? 0 : DEFAULT_QTY;
 
-    /* ===== PRICE UPDATE ===== */
+    /* ===== UPDATE PRICE ===== */
     await fetch(
       `https://api.ebay.com/sell/inventory/v1/inventory_item/${sku}/price`,
       {
@@ -51,7 +74,7 @@ app.post("/sync", async (req, res) => {
       }
     );
 
-    /* ===== QUANTITY UPDATE ===== */
+    /* ===== UPDATE QUANTITY ===== */
     await fetch(
       `https://api.ebay.com/sell/inventory/v1/inventory_item/${sku}`,
       {
@@ -85,7 +108,7 @@ app.post("/sync", async (req, res) => {
 });
 
 /* ===============================
-   START SERVER
+   START
 ================================ */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
