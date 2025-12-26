@@ -1,12 +1,17 @@
 {
-  "name": "ebay-sync-server",
+  "name": "ebay-oauth-server",
   "version": "1.0.0",
+  "description": "Backend server for Amazon to eBay sync",
+  "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5"
+    "axios": "^1.6.7",
+    "cheerio": "^1.0.0-rc.12",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2"
   }
 }
