@@ -1,10 +1,8 @@
 import axios from "axios";
-import cheerio from "cheerio";
+import * as cheerio from "cheerio";
 
 /**
  * Fetch Amazon price & availability by ASIN
- * @param {string} asin
- * @returns {object}
  */
 export async function fetchAmazonData(asin) {
   if (!asin) {
@@ -26,7 +24,6 @@ export async function fetchAmazonData(asin) {
 
   const $ = cheerio.load(response.data);
 
-  // Try multiple selectors (Amazon changes often)
   let priceText =
     $("#priceblock_ourprice").text() ||
     $("#priceblock_dealprice").text() ||
@@ -35,7 +32,7 @@ export async function fetchAmazonData(asin) {
   const availability = $("#availability span").text().trim();
 
   if (!priceText) {
-    throw new Error("Price not found (possible captcha or layout change)");
+    throw new Error("Price not found (Amazon layout or bot protection)");
   }
 
   const price = parseFloat(
