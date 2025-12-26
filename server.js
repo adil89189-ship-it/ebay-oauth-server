@@ -1,5 +1,4 @@
 import express from "express";
-import fetch from "node-fetch";
 import cors from "cors";
 
 const app = express();
@@ -81,7 +80,7 @@ app.get("/oauth/callback", async (req, res) => {
       created_at: Date.now()
     };
 
-    console.log("✅ eBay token stored in memory");
+    console.log("✅ eBay token stored");
 
     res.json({
       ok: true,
