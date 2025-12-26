@@ -12,8 +12,9 @@ app.use(express.json());
 const {
   EBAY_CLIENT_ID,
   EBAY_CLIENT_SECRET,
-  EBAY_REFRESH_TOKEN,
-  EBAY_ENV
+  EBAY_ENV,
+  EBAY_REDIRECT_URI,
+  EBAY_REFRESH_TOKEN
 } = process.env;
 
 const EBAY_API =
@@ -25,11 +26,69 @@ const EBAY_API =
    HEALTH CHECK
 ================================ */
 app.get("/", (req, res) => {
-  res.send("✅ eBay Sync Server Running (Option A + Debug)");
+  res.send("✅ eBay Sync Server Running (OPTION A)");
 });
 
 /* ===============================
-   GET ACCESS TOKEN
+   OAUTH START
+================================ */
+app.get("/oauth/start", (req, res) => {
+  const scopes = [
+    "https://api.ebay.com/oauth/api_scope",
+    "https://api.ebay.com/oauth/api_scope/sell.inventory"
+  ].join(" ");
+
+  const url =
+    `${EBAY_API}/identity/v1/oauth2/authorize` +
+    `?client_id=${EBAY_CLIENT_ID}` +
+    `&response_type=code` +
+    `&redirect_uri=${encodeURIComponent(EBAY_REDIRECT_URI)}` +
+    `&scope=${encodeURIComponent(scopes)}`;
+
+  res.redirect(url);
+});
+
+/* ===============================
+   OAUTH CALLBACK
+================================ */
+app.get("/oauth/callback", async (req, res) => {
+  const code = req.query.code;
+  if (!code) return res.status(400).send("Missing code");
+
+  const auth = Buffer.from(
+    `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
+  ).toString("base64");
+
+  const response = await fetch(
+    `${EBAY_API}/identity/v1/oauth2/token`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${auth}`
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: EBAY_REDIRECT_URI
+      })
+    }
+  );
+
+  const data = await response.json();
+  console.log("🔐 EBAY OAUTH RESULT:", data);
+
+  if (!data.refresh_token) {
+    return res.status(500).json(data);
+  }
+
+  res.send(
+    "OAuth success. Refresh token printed in server logs."
+  );
+});
+
+/* ===============================
+   ACCESS TOKEN (REFRESH)
 ================================ */
 async function getAccessToken() {
   const auth = Buffer.from(
@@ -52,205 +111,43 @@ async function getAccessToken() {
     }
   );
 
-  const data = await response.json();
+  const text = await response.text();
+  console.log("🔄 TOKEN REFRESH RESPONSE:", text);
 
-  if (!data.access_token) {
-    console.error("❌ TOKEN REFRESH FAILED", data);
-    throw new Error("Token refresh failed");
-  }
-
+  const data = JSON.parse(text);
+  if (!data.access_token) throw new Error("Token refresh failed");
   return data.access_token;
 }
 
 /* ===============================
-   DEBUG INVENTORY ITEM
+   DEBUG INVENTORY
 ================================ */
 app.get("/debug/inventory/:sku", async (req, res) => {
   try {
-    const accessToken = await getAccessToken();
-    const response = await fetch(
-      `${EBAY_API}/sell/inventory/v1/inventory_item/${req.params.sku}`,
+    const token = await getAccessToken();
+    const sku = req.params.sku;
+
+    const r = await fetch(
+      `${EBAY_API}/sell/inventory/v1/inventory_item/${sku}`,
       {
         headers: {
-          Authorization: `Bearer ${accessToken}`
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
         }
       }
     );
 
-    const data = await response.json();
-
-    res.json({
-      sku: req.params.sku,
-      httpStatus: response.status,
-      data
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const data = await r.json();
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
 /* ===============================
-   UPDATE INVENTORY QUANTITY
-================================ */
-async function updateInventoryQuantity(sku, quantity, accessToken) {
-  const response = await fetch(
-    `${EBAY_API}/sell/inventory/v1/inventory_item/${sku}`,
-    {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        availability: {
-          shipToLocationAvailability: {
-            quantity
-          }
-        }
-      })
-    }
-  );
-
-  return {
-    ok: response.ok,
-    status: response.status,
-    body: await response.json()
-  };
-}
-
-/* ===============================
-   GET OFFER ID
-================================ */
-async function getOfferId(sku, accessToken) {
-  const response = await fetch(
-    `${EBAY_API}/sell/inventory/v1/offer?sku=${sku}`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`
-      }
-    }
-  );
-
-  const data = await response.json();
-  return data.offers?.[0]?.offerId || null;
-}
-
-/* ===============================
-   UPDATE OFFER PRICE
-================================ */
-async function updateOfferPrice(offerId, price, accessToken) {
-  const response = await fetch(
-    `${EBAY_API}/sell/inventory/v1/offer/${offerId}`,
-    {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        pricingSummary: {
-          price: {
-            value: price.toFixed(2),
-            currency: "GBP"
-          }
-        }
-      })
-    }
-  );
-
-  return {
-    ok: response.ok,
-    status: response.status,
-    body: await response.json()
-  };
-}
-
-/* ===============================
-   SYNC ENDPOINT
-================================ */
-app.post("/sync", async (req, res) => {
-  try {
-    const { amazonSku, amazonPrice, inStock } = req.body;
-
-    if (!amazonSku || amazonPrice == null) {
-      return res.status(400).json({
-        ok: false,
-        reason: "INVALID_PAYLOAD",
-        received: req.body
-      });
-    }
-
-    const DEFAULT_QTY = inStock ? 5 : 0;
-    const PRICE_MULTIPLIER = 1.35;
-    const finalPrice = amazonPrice * PRICE_MULTIPLIER;
-
-    const accessToken = await getAccessToken();
-
-    /* ---- Quantity Update ---- */
-    const qtyResult = await updateInventoryQuantity(
-      amazonSku,
-      DEFAULT_QTY,
-      accessToken
-    );
-
-    if (!qtyResult.ok) {
-      console.error("❌ QTY UPDATE FAILED", amazonSku, qtyResult);
-      return res.json({
-        ok: false,
-        sku: amazonSku,
-        step: "quantity",
-        error: qtyResult
-      });
-    }
-
-    /* ---- Price Update ---- */
-    const offerId = await getOfferId(amazonSku, accessToken);
-
-    if (!offerId) {
-      console.error("❌ OFFER NOT FOUND", amazonSku);
-      return res.json({
-        ok: false,
-        sku: amazonSku,
-        step: "price",
-        reason: "OFFER_NOT_FOUND"
-      });
-    }
-
-    const priceResult = await updateOfferPrice(
-      offerId,
-      finalPrice,
-      accessToken
-    );
-
-    if (!priceResult.ok) {
-      console.error("❌ PRICE UPDATE FAILED", amazonSku, priceResult);
-      return res.json({
-        ok: false,
-        sku: amazonSku,
-        step: "price",
-        error: priceResult
-      });
-    }
-
-    console.log("✅ SYNC SUCCESS", amazonSku);
-
-    res.json({
-      ok: true,
-      sku: amazonSku,
-      quantity: DEFAULT_QTY,
-      price: finalPrice.toFixed(2)
-    });
-
-  } catch (err) {
-    console.error("❌ SYNC ERROR", err);
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-/* ===============================
-   START SERVER
+   SERVER START
 ================================ */
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+app.listen(PORT, () =>
+  console.log("🚀 Server running on port", PORT)
+);
