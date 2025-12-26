@@ -9,16 +9,63 @@ app.use(express.json());
 const {
   EBAY_CLIENT_ID,
   EBAY_CLIENT_SECRET,
-  EBAY_REDIRECT_URI,
-  EBAY_ENV
+  EBAY_REFRESH_TOKEN,
+  EBAY_ENV,
+  EBAY_RUNAME,
+  EBAY_REDIRECT_URI
 } = process.env;
 
-if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET || !EBAY_REDIRECT_URI) {
+if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET || !EBAY_REFRESH_TOKEN) {
   console.error("❌ Missing required environment variables");
 }
 
-const EBAY_AUTH_URL = "https://auth.ebay.com/oauth2/authorize";
-const EBAY_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token";
+/* ===============================
+   EBAY BASE URL
+================================ */
+const EBAY_API =
+  EBAY_ENV === "production"
+    ? "https://api.ebay.com"
+    : "https://api.sandbox.ebay.com";
+
+/* ===============================
+   ACCESS TOKEN CACHE
+================================ */
+let cachedToken = null;
+let tokenExpiry = 0;
+
+async function getAccessToken() {
+  if (cachedToken && Date.now() < tokenExpiry) {
+    return cachedToken;
+  }
+
+  const auth = Buffer.from(
+    `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
+  ).toString("base64");
+
+  const res = await fetch(`${EBAY_API}/identity/v1/oauth2/token`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${auth}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: EBAY_REFRESH_TOKEN,
+      scope: "https://api.ebay.com/oauth/api_scope"
+    })
+  });
+
+  const data = await res.json();
+
+  if (!data.access_token) {
+    throw new Error("Token refresh failed");
+  }
+
+  cachedToken = data.access_token;
+  tokenExpiry = Date.now() + data.expires_in * 1000 - 60000;
+
+  return cachedToken;
+}
 
 /* ===============================
    HEALTH CHECK
@@ -28,72 +75,46 @@ app.get("/", (req, res) => {
 });
 
 /* ===============================
-   START OAUTH
+   DEBUG TOKEN
 ================================ */
-app.get("/oauth/start", (req, res) => {
-  const scope = encodeURIComponent(
-    "https://api.ebay.com/oauth/api_scope " +
-    "https://api.ebay.com/oauth/api_scope/sell.inventory " +
-    "https://api.ebay.com/oauth/api_scope/sell.account"
-  );
-
-  const url =
-    `${EBAY_AUTH_URL}?client_id=${EBAY_CLIENT_ID}` +
-    `&response_type=code` +
-    `&redirect_uri=${EBAY_REDIRECT_URI}` +
-    `&scope=${scope}`;
-
-  res.redirect(url);
-});
-
-/* ===============================
-   OAUTH CALLBACK
-================================ */
-app.get("/oauth/callback", async (req, res) => {
-  const code = req.query.code;
-
-  if (!code) {
-    return res.status(400).json({ error: "Missing authorization code" });
-  }
-
-  const basicAuth = Buffer.from(
-    `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
-  ).toString("base64");
-
+app.get("/debug/token", async (req, res) => {
   try {
-    const response = await fetch(EBAY_TOKEN_URL, {
-      method: "POST",
-      headers: {
-        "Authorization": `Basic ${basicAuth}`,
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: EBAY_REDIRECT_URI
-      })
-    });
-
-    const data = await response.json();
-
-    if (!data.refresh_token) {
-      return res.status(500).json(data);
-    }
-
-    console.log("✅ REFRESH TOKEN:", data.refresh_token);
-
-    res.json({
-      success: true,
-      message: "OAuth success — refresh token generated",
-      refresh_token: data.refresh_token
-    });
-
+    const token = await getAccessToken();
+    res.json({ ok: true, token: token.slice(0, 25) + "..." });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+/* ===============================
+   DEBUG INVENTORY BY SKU
+================================ */
+app.get("/debug/inventory/:sku", async (req, res) => {
+  try {
+    const sku = req.params.sku;
+    const token = await getAccessToken();
+
+    const response = await fetch(
+      `${EBAY_API}/sell/inventory/v1/inventory_item/${sku}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ===============================
+   START SERVER
+================================ */
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () =>
-  console.log(`🚀 Server running on port ${PORT}`)
-);
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
