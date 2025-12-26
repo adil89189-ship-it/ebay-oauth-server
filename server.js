@@ -8,18 +8,17 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-/**
- * Health check
- */
+/* ===============================
+   HEALTH CHECK
+================================ */
 app.get("/", (req, res) => {
-  res.send("✅ Amazon → eBay Sync Server Running");
+  res.send("Amazon → eBay backend running ✅");
 });
 
-/**
- * Test Amazon fetch
- * Example:
- * /amazon/test?asin=B01CZNPFCC
- */
+/* ===============================
+   AMAZON TEST ROUTE
+   /amazon/test?asin=B01CZNPFCC
+================================ */
 app.get("/amazon/test", async (req, res) => {
   try {
     const { asin } = req.query;
@@ -29,14 +28,12 @@ app.get("/amazon/test", async (req, res) => {
     }
 
     const data = await fetchAmazonData(asin);
+    res.json({ ok: true, data });
 
-    res.json({
-      success: true,
-      data,
-    });
   } catch (err) {
+    console.error("Amazon fetch error:", err.message);
     res.status(500).json({
-      success: false,
+      ok: false,
       error: err.message,
     });
   }
