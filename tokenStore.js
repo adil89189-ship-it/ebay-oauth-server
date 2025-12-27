@@ -7,6 +7,17 @@ export function saveToken(token) {
 }
 
 export function loadToken() {
-  if (!fs.existsSync(FILE)) return null;
-  return JSON.parse(fs.readFileSync(FILE));
+  // 1️⃣ Try file first
+  if (fs.existsSync(FILE)) {
+    return JSON.parse(fs.readFileSync(FILE));
+  }
+
+  // 2️⃣ Fallback to environment refresh token (Render-safe)
+  if (process.env.EBAY_REFRESH_TOKEN) {
+    return {
+      refresh_token: process.env.EBAY_REFRESH_TOKEN
+    };
+  }
+
+  return null;
 }
