@@ -3,7 +3,19 @@ import cors from "cors";
 import { reviseListing } from "./ebayTrading.js";
 
 const app = express();
-app.use(cors());
+
+/* ===============================
+   CORS FIX (THIS IS CRITICAL)
+================================ */
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"]
+}));
+
+// Handle preflight requests
+app.options("*", cors());
+
 app.use(express.json());
 
 app.get("/", (req, res) => {
@@ -18,12 +30,15 @@ app.post("/sync", async (req, res) => {
       return res.json({ ok: false, error: "Invalid payload" });
     }
 
-    // 🔐 Enforce eBay minimum price
     const safePrice = Math.max(Number(price.toFixed(2)), 0.99);
 
-    const result = await reviseListing({ itemId, price: safePrice, quantity });
-    return res.json(result);
+    const result = await reviseListing({
+      itemId,
+      price: safePrice,
+      quantity
+    });
 
+    return res.json(result);
   } catch (err) {
     return res.json({ ok: false, error: err.message });
   }
