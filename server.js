@@ -1,36 +1,85 @@
-import express from "express";
-import cors from "cors";
-import { updateInventory } from "./ebayInventory.js";
-import { registerSku } from "./ebayRegister.js";
-import { bindOffer } from "./ebayOffer.js";
+import fetch from "node-fetch";
+import { loadToken } from "./tokenStore.js";
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+const EBAY_API = "https://api.ebay.com";
 
-app.get("/", (_, res) => {
-  res.send("🟢 eBay Sync Backend Running");
-});
+/**
+ * Find existing offer for this SKU (if already bound)
+ */
+async function findExistingOffer(sku, token) {
+  const res = await fetch(
+    `${EBAY_API}/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token.access_token}`,
+        "Content-Type": "application/json",
+        "Content-Language": "en-GB"
+      }
+    }
+  );
 
-app.post("/register-sku", async (req, res) => {
-  const { sku } = req.body;
-  if (!sku) return res.json({ ok: false, message: "Missing SKU" });
-  const result = await registerSku(sku);
-  res.json(result);
-});
+  const data = await res.json();
+  if (data.offers && data.offers.length > 0) {
+    return data.offers[0].offerId;
+  }
+  return null;
+}
 
-app.post("/bind-offer", async (req, res) => {
-  const { sku } = req.body;
-  if (!sku) return res.json({ ok: false, message: "Missing SKU" });
-  const result = await bindOffer(sku);
-  res.json(result);
-});
+/**
+ * Create offer only if it doesn't already exist
+ */
+async function createOfferIfMissing(sku, token) {
+  const existingOffer = await findExistingOffer(sku, token);
+  if (existingOffer) return existingOffer;
 
-app.post("/sync", async (req, res) => {
-  const result = await updateInventory(req.body);
-  res.json(result);
-});
+  const res = await fetch(`${EBAY_API}/sell/inventory/v1/offer`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token.access_token}`,
+      "Content-Type": "application/json",
+      "Content-Language": "en-GB"
+    },
+    body: JSON.stringify({
+      sku,
+      marketplaceId: "EBAY_GB",
+      format: "FIXED_PRICE",
+      listingDescription: "Auto-managed by sync system",
+      availableQuantity: 1
+    })
+  });
 
-app.listen(process.env.PORT || 3000, () =>
-  console.log("🚀 Backend live")
-);
+  const data = await res.json();
+  return data.offerId;
+}
+
+/**
+ * Publish the offer (binds it to live listing)
+ */
+async function publishOffer(offerId, token) {
+  const res = await fetch(
+    `${EBAY_API}/sell/inventory/v1/offer/${offerId}/publish`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token.access_token}`,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+
+  return await res.text();
+}
+
+/**
+ * Main binding function
+ */
+export async function bindOffer(sku) {
+  const token = loadToken();
+  if (!token || !token.access_token)
+    return { ok: false, message: "Not authenticated" };
+
+  const offerId = await createOfferIfMissing(sku, token);
+  const result = await publishOffer(offerId, token);
+
+  return { ok: true, offerId, result };
+}
