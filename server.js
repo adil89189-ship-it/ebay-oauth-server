@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
-import { buildAuthUrl, exchangeCodeForToken } from "./ebayAuth.js";
 import { updateInventory } from "./ebayInventory.js";
+import { registerSku } from "./ebayRegister.js";
 
 const app = express();
 app.use(cors());
@@ -12,28 +12,18 @@ app.get("/", (_, res) => {
 });
 
 /* ===============================
-   STEP 1: START OAUTH
+   REGISTER SKU (ONE-TIME)
 ================================ */
-app.get("/oauth/start", (_, res) => {
-  const url = buildAuthUrl();
-  res.json({ ok: true, url });
+app.post("/register-sku", async (req, res) => {
+  const { sku } = req.body;
+  if (!sku) return res.json({ ok: false, message: "Missing SKU" });
+
+  const result = await registerSku(sku);
+  res.json(result);
 });
 
 /* ===============================
-   STEP 2: OAUTH CALLBACK
-================================ */
-app.get("/oauth/callback", async (req, res) => {
-  const { code } = req.query;
-  if (!code) return res.status(400).send("Missing code");
-
-  const result = await exchangeCodeForToken(code);
-  if (!result.ok) return res.status(500).json(result);
-
-  res.send("✅ eBay connected. You can close this window.");
-});
-
-/* ===============================
-   STEP 3: SYNC INVENTORY
+   SYNC PRICE + QUANTITY
 ================================ */
 app.post("/sync", async (req, res) => {
   const result = await updateInventory(req.body);
