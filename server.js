@@ -18,7 +18,10 @@ app.post("/sync", async (req, res) => {
       return res.json({ ok: false, error: "Invalid payload" });
     }
 
-    const result = await reviseListing({ itemId, price, quantity });
+    // 🔐 Enforce eBay minimum price
+    const safePrice = Math.max(Number(price.toFixed(2)), 0.99);
+
+    const result = await reviseListing({ itemId, price: safePrice, quantity });
     return res.json(result);
 
   } catch (err) {
