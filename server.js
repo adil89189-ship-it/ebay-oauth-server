@@ -4,11 +4,19 @@ import fetch from "node-fetch";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(express.json());
+
 const CLIENT_ID = process.env.EBAY_CLIENT_ID;
 const CLIENT_SECRET = process.env.EBAY_CLIENT_SECRET;
 const RUNAME = process.env.EBAY_RUNAME;
 
-// 🟢 Start OAuth
+// In-memory stores
+global.ebayToken = null;
+const skuStore = new Map();
+
+/* ============================
+   AUTH START
+============================ */
 app.get("/auth", (req, res) => {
   const url =
     `https://auth.ebay.com/oauth2/authorize?` +
@@ -20,13 +28,13 @@ app.get("/auth", (req, res) => {
   res.redirect(url);
 });
 
-// 🟢 Token exchange logic (shared)
+/* ============================
+   OAUTH CALLBACK HANDLER
+============================ */
 async function handleCallback(req, res) {
   const code = req.query.code;
 
-  if (!code) {
-    return res.send("❌ Missing authorization code");
-  }
+  if (!code) return res.send("❌ Missing authorization code");
 
   const tokenRes = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
     method: "POST",
@@ -34,36 +42,55 @@ async function handleCallback(req, res) {
       "Content-Type": "application/x-www-form-urlencoded",
       "Authorization": "Basic " + Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64")
     },
-    body:
-      `grant_type=authorization_code&` +
-      `code=${code}&` +
-      `redirect_uri=${RUNAME}`
+    body: `grant_type=authorization_code&code=${code}&redirect_uri=${RUNAME}`
   });
 
   const data = await tokenRes.json();
   console.log("🧾 TOKEN DATA:", data);
 
-  if (!data.access_token) {
-    return res.send("❌ Token exchange failed");
-  }
+  if (!data.access_token) return res.send("❌ Token exchange failed");
 
   global.ebayToken = data;
 
   res.send("✅ eBay connected successfully. You may close this window.");
 }
 
-// 🟢 Accept both callback paths
 app.get("/callback", handleCallback);
 app.get("/oauth/callback", handleCallback);
 
-// 🟢 Test auth status
+/* ============================
+   AUTH STATUS
+============================ */
 app.get("/status", (req, res) => {
-  if (!global.ebayToken) {
-    return res.json({ ok: false, message: "Not authenticated" });
-  }
+  if (!global.ebayToken) return res.json({ ok: false, message: "Not authenticated" });
   res.json({ ok: true });
 });
 
+/* ============================
+   SKU REGISTRATION
+============================ */
+app.post("/register-sku", (req, res) => {
+  if (!global.ebayToken) return res.status(401).json({ ok: false, message: "Not authenticated" });
+
+  const { amazonSku, ebayItemId, multiplier, quantity } = req.body;
+
+  if (!amazonSku || !ebayItemId)
+    return res.status(400).json({ ok: false, message: "Missing required fields" });
+
+  skuStore.set(amazonSku, {
+    amazonSku,
+    ebayItemId,
+    multiplier: Number(multiplier || 1),
+    quantity: Number(quantity || 1),
+    lastSync: null
+  });
+
+  res.json({ ok: true, message: "SKU registered" });
+});
+
+/* ============================
+   SERVER START
+============================ */
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
