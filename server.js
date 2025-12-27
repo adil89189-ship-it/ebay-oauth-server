@@ -25,15 +25,17 @@ app.get("/", (req, res) => {
    AUTH START
 ============================ */
 app.get("/auth", (req, res) => {
+  const scope =
+    "https://api.ebay.com/oauth/api_scope " +
+    "https://api.ebay.com/oauth/api_scope/sell.inventory " +
+    "https://api.ebay.com/oauth/api_scope/sell.account";
+
   const url =
     `https://auth.ebay.com/oauth2/authorize?` +
     `client_id=${CLIENT_ID}` +
     `&response_type=code` +
     `&redirect_uri=${RUNAME}` +
-    `&scope=https://api.ebay.com/oauth/api_scope
-%20https://api.ebay.com/oauth/api_scope/sell.inventory
-%20https://api.ebay.com/oauth/api_scope/sell.account
-`;
+    `&scope=${encodeURIComponent(scope)}`;
 
   res.redirect(url);
 });
@@ -50,7 +52,8 @@ async function handleCallback(req, res) {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
-      "Authorization": "Basic " + Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64")
+      "Authorization":
+        "Basic " + Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64")
     },
     body: `grant_type=authorization_code&code=${code}&redirect_uri=${RUNAME}`
   });
@@ -72,7 +75,8 @@ app.get("/oauth/callback", handleCallback);
    AUTH STATUS
 ============================ */
 app.get("/status", (req, res) => {
-  if (!global.ebayToken) return res.json({ ok: false, message: "Not authenticated" });
+  if (!global.ebayToken)
+    return res.json({ ok: false, message: "Not authenticated" });
   res.json({ ok: true });
 });
 
@@ -80,7 +84,8 @@ app.get("/status", (req, res) => {
    SKU REGISTRATION
 ============================ */
 app.post("/register-sku", (req, res) => {
-  if (!global.ebayToken) return res.status(401).json({ ok: false, message: "Not authenticated" });
+  if (!global.ebayToken)
+    return res.status(401).json({ ok: false, message: "Not authenticated" });
 
   const { amazonSku, ebayItemId, multiplier, quantity } = req.body;
 
@@ -102,16 +107,14 @@ app.post("/register-sku", (req, res) => {
    LIVE EBAY SYNC ENGINE
 ============================ */
 app.post("/sync-now", async (req, res) => {
-  if (!global.ebayToken) {
+  if (!global.ebayToken)
     return res.status(401).json({ ok: false, message: "Not authenticated" });
-  }
 
-  const { amazonSku, newPrice, newQuantity } = req.body;
+  const { amazonSku, newQuantity } = req.body;
 
   const sku = skuStore.get(amazonSku);
-  if (!sku) {
+  if (!sku)
     return res.status(404).json({ ok: false, message: "SKU not registered" });
-  }
 
   const finalQuantity = newQuantity ?? sku.quantity;
 
@@ -129,7 +132,8 @@ app.post("/sync-now", async (req, res) => {
     method: "PUT",
     headers: {
       "Authorization": `Bearer ${global.ebayToken.access_token}`,
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      "Content-Language": "en-GB"
     },
     body: JSON.stringify(payload)
   });
