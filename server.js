@@ -10,7 +10,7 @@ const CLIENT_ID = process.env.EBAY_CLIENT_ID;
 const CLIENT_SECRET = process.env.EBAY_CLIENT_SECRET;
 const RUNAME = process.env.EBAY_RUNAME;
 
-// In-memory stores (temporary — will persist later)
+// In-memory stores (we will persist later)
 global.ebayToken = null;
 const skuStore = new Map();
 
@@ -31,8 +31,7 @@ app.get("/auth", (req, res) => {
     "https://api.ebay.com/oauth/api_scope/sell.account";
 
   const url =
-    `https://auth.ebay.com/oauth2/authorize?` +
-    `client_id=${CLIENT_ID}` +
+    `https://auth.ebay.com/oauth2/authorize?client_id=${CLIENT_ID}` +
     `&response_type=code` +
     `&redirect_uri=${RUNAME}` +
     `&scope=${encodeURIComponent(scope)}`;
@@ -58,8 +57,6 @@ async function handleCallback(req, res) {
   });
 
   const data = await tokenRes.json();
-  console.log("🧾 TOKEN DATA:", data);
-
   if (!data.access_token) return res.send("❌ Token exchange failed");
 
   global.ebayToken = data;
@@ -101,7 +98,7 @@ app.post("/register-sku", (req, res) => {
 });
 
 /* ============================
-   LIVE EBAY SYNC ENGINE
+   LIVE INVENTORY SYNC
 ============================ */
 app.post("/sync-now", async (req, res) => {
   if (!global.ebayToken)
@@ -134,14 +131,66 @@ app.post("/sync-now", async (req, res) => {
   });
 
   let result = {};
-  try {
-    result = await response.json();
-  } catch {
-    result = {};
-  }
+  try { result = await response.json(); } catch {}
 
   sku.lastSync = new Date().toISOString();
   res.json({ ok: true, ebayResponse: result });
+});
+
+/* ============================
+   BIND INVENTORY → OFFER → LISTING
+============================ */
+app.post("/bind-listing", async (req, res) => {
+  if (!global.ebayToken)
+    return res.status(401).json({ ok: false, message: "Not authenticated" });
+
+  const { sku, price, quantity } = req.body;
+
+  const offerPayload = {
+    sku,
+    marketplaceId: "EBAY_GB",
+    format: "FIXED_PRICE",
+    availableQuantity: quantity,
+    categoryId: "176972",
+    listingDescription: "Auto-synced product",
+    pricingSummary: {
+      price: { value: price, currency: "GBP" }
+    },
+    listingPolicies: {
+      fulfillmentPolicyId: process.env.EBAY_FULFILLMENT_POLICY_ID,
+      paymentPolicyId: process.env.EBAY_PAYMENT_POLICY_ID,
+      returnPolicyId: process.env.EBAY_RETURN_POLICY_ID
+    }
+  };
+
+  const createOffer = await fetch("https://api.ebay.com/sell/inventory/v1/offer", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${global.ebayToken.access_token}`,
+      "Content-Type": "application/json",
+      "Content-Language": "en-GB"
+    },
+    body: JSON.stringify(offerPayload)
+  });
+
+  const offerData = await createOffer.json();
+
+  const publishOffer = await fetch(
+    `https://api.ebay.com/sell/inventory/v1/offer/${offerData.offerId}/publish`,
+    {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${global.ebayToken.access_token}`,
+        "Content-Type": "application/json",
+        "Content-Language": "en-GB"
+      }
+    }
+  );
+
+  let publishResult = {};
+  try { publishResult = await publishOffer.json(); } catch {}
+
+  res.json({ ok: true, offerId: offerData.offerId, publishResult });
 });
 
 /* ============================
