@@ -1,42 +1,45 @@
 import express from "express";
 import cors from "cors";
-import fetch from "node-fetch";
+import { buildAuthUrl, exchangeCodeForToken } from "./ebayAuth.js";
+import { updateInventory } from "./ebayInventory.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ===============================
-   ENV Variables
-================================ */
-const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN; // Replace with your eBay token
-
-/* ===============================
-   HEALTH CHECK
-================================ */
-app.get("/", (req, res) => {
-  res.send("eBay Sync Server Running");
+app.get("/", (_, res) => {
+  res.send("🟢 eBay Sync Backend Running");
 });
 
 /* ===============================
-   INVENTORY UPDATE PLACEHOLDER
+   STEP 1: START OAUTH
 ================================ */
-app.post("/update-inventory", async (req, res) => {
-  const { sku, price, quantity } = req.body;
-  console.log("📦 Inventory update request:", req.body);
-
-  // Placeholder response
-  res.json({
-    ok: true,
-    message: "Inventory update accepted",
-    received: { sku, price, quantity }
-  });
+app.get("/oauth/start", (_, res) => {
+  const url = buildAuthUrl();
+  res.json({ ok: true, url });
 });
 
 /* ===============================
-   START SERVER
+   STEP 2: OAUTH CALLBACK
 ================================ */
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+app.get("/oauth/callback", async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.status(400).send("Missing code");
+
+  const result = await exchangeCodeForToken(code);
+  if (!result.ok) return res.status(500).json(result);
+
+  res.send("✅ eBay connected. You can close this window.");
 });
+
+/* ===============================
+   STEP 3: SYNC INVENTORY
+================================ */
+app.post("/sync", async (req, res) => {
+  const result = await updateInventory(req.body);
+  res.json(result);
+});
+
+app.listen(process.env.PORT || 3000, () =>
+  console.log("🚀 Backend live")
+);
