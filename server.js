@@ -1,60 +1,42 @@
 import express from "express";
+import fetch from "node-fetch";
 import cors from "cors";
-import { reviseListing } from "./ebayTrading.js";
 
 const app = express();
-
-/* ===============================
-   CORS (Allow Chrome Extension)
-================================ */
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type"]
-}));
-
-app.options("*", cors());
-
+app.use(cors());
 app.use(express.json());
 
-/* ===============================
-   HEALTH CHECK
-================================ */
-app.get("/", (req, res) => {
-  res.send("🟢 eBay Trading Sync LIVE");
-});
-
-/* ===============================
-   MAIN SYNC ENDPOINT
-================================ */
 app.post("/sync", async (req, res) => {
-  try {
-    const { itemId, sku, price, quantity } = req.body;
-    const finalItemId = itemId || sku;
+  const { itemId, price, quantity } = req.body;
 
-    if (!finalItemId || typeof price !== "number" || typeof quantity !== "number") {
-      return res.json({ ok: false, error: "Invalid payload" });
-    }
+  const token = process.env.EBAY_TRADING_TOKEN;
+  if (!token) return res.json({ ok:false, error:"Missing Trading Token" });
 
-    const safePrice = Math.max(Number(price.toFixed(2)), 0.99);
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+  <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+    <RequesterCredentials>
+      <eBayAuthToken>${token}</eBayAuthToken>
+    </RequesterCredentials>
+    <Item>
+      <ItemID>${itemId}</ItemID>
+      <StartPrice>${price}</StartPrice>
+      <Quantity>${quantity}</Quantity>
+    </Item>
+  </ReviseFixedPriceItemRequest>`;
 
-    const result = await reviseListing({
-      itemId: finalItemId,
-      price: safePrice,
-      quantity
-    });
+  const r = await fetch("https://api.ebay.com/ws/api.dll", {
+    method:"POST",
+    headers:{
+      "Content-Type":"text/xml",
+      "X-EBAY-API-CALL-NAME":"ReviseFixedPriceItem",
+      "X-EBAY-API-SITEID":"3",
+      "X-EBAY-API-COMPATIBILITY-LEVEL":"967"
+    },
+    body: xml
+  });
 
-    return res.json(result);
-  } catch (err) {
-    console.error("SYNC ERROR:", err);
-    return res.json({ ok: false, error: err.message });
-  }
+  const data = await r.text();
+  res.send(data);
 });
 
-/* ===============================
-   START SERVER
-================================ */
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`🟢 Server running on ${PORT}`);
-});
+app.listen(10000, () => console.log("Server running"));
