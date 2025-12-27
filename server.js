@@ -21,7 +21,7 @@ app.get("/", (req, res) => {
 });
 
 /* ===============================
-   TOKEN DEBUG
+   TOKEN STATUS
 ================================ */
 app.get("/debug/token", (req, res) => {
   res.json({
@@ -33,20 +33,24 @@ app.get("/debug/token", (req, res) => {
 });
 
 /* ===============================
-   OAUTH CALLBACK
+   STORE TOKENS FROM EXTENSION
 ================================ */
-app.get("/oauth/callback", async (req, res) => {
-  const { access_token, refresh_token, expires_in } = req.query;
+app.post("/auth/store", (req, res) => {
+  const { access_token, refresh_token, expires_in } = req.body;
+
+  if (!access_token || !refresh_token) {
+    return res.json({ ok: false, error: "Missing tokens" });
+  }
 
   tokenStore.access_token = access_token;
   tokenStore.refresh_token = refresh_token;
   tokenStore.expires_at = Date.now() + Number(expires_in) * 1000;
 
-  res.send("✅ eBay connected successfully. You may close this window.");
+  res.json({ ok: true });
 });
 
 /* ===============================
-   CORE SYNC ENGINE
+   LIVE SYNC ENGINE
 ================================ */
 app.post("/sync", async (req, res) => {
   try {
@@ -54,23 +58,22 @@ app.post("/sync", async (req, res) => {
       return res.json({ ok: false, error: "Not authenticated" });
     }
 
-    const { itemId, amazonPrice, multiplier, quantity } = req.body;
+    const { sku, price, quantity } = req.body;
 
-    const finalPrice = (amazonPrice * multiplier).toFixed(2);
+    if (!sku || typeof price !== "number" || typeof quantity !== "number") {
+      return res.json({ ok: false, error: "Invalid payload" });
+    }
 
-    // 1️⃣ Find offerId from Item ID
+    // 1️⃣ Find offer by SKU
     const offerRes = await fetch(
-      `${EBAY_API}/sell/inventory/v1/offer?sku=${itemId}`,
-      {
-        headers: {
-          Authorization: `Bearer ${tokenStore.access_token}`
-        }
-      }
+      `${EBAY_API}/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`,
+      { headers: { Authorization: `Bearer ${tokenStore.access_token}` } }
     );
 
     const offerData = await offerRes.json();
+
     if (!offerData.offers || !offerData.offers.length) {
-      return res.json({ ok: false, error: "Offer not found for item" });
+      return res.json({ ok: false, error: "Offer not found for SKU" });
     }
 
     const offerId = offerData.offers[0].offerId;
@@ -83,9 +86,7 @@ app.post("/sync", async (req, res) => {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        pricingSummary: {
-          price: { value: finalPrice, currency: "GBP" }
-        },
+        pricingSummary: { price: { value: price.toFixed(2), currency: "GBP" } },
         availableQuantity: quantity
       })
     });
@@ -93,17 +94,10 @@ app.post("/sync", async (req, res) => {
     // 3️⃣ Publish
     await fetch(`${EBAY_API}/sell/inventory/v1/offer/${offerId}/publish`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${tokenStore.access_token}`
-      }
+      headers: { Authorization: `Bearer ${tokenStore.access_token}` }
     });
 
-    res.json({
-      ok: true,
-      finalPrice,
-      finalQuantity: quantity,
-      offerId
-    });
+    res.json({ ok: true, sku, price, quantity, offerId });
 
   } catch (err) {
     res.json({ ok: false, error: err.message });
