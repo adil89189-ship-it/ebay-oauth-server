@@ -10,7 +10,7 @@ const CLIENT_ID = process.env.EBAY_CLIENT_ID;
 const CLIENT_SECRET = process.env.EBAY_CLIENT_SECRET;
 const RUNAME = process.env.EBAY_RUNAME;
 
-// In-memory stores
+// In-memory stores (temporary — will persist later)
 global.ebayToken = null;
 const skuStore = new Map();
 
@@ -45,7 +45,6 @@ app.get("/auth", (req, res) => {
 ============================ */
 async function handleCallback(req, res) {
   const code = req.query.code;
-
   if (!code) return res.send("❌ Missing authorization code");
 
   const tokenRes = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
@@ -64,7 +63,6 @@ async function handleCallback(req, res) {
   if (!data.access_token) return res.send("❌ Token exchange failed");
 
   global.ebayToken = data;
-
   res.send("✅ eBay connected successfully. You may close this window.");
 }
 
@@ -88,7 +86,6 @@ app.post("/register-sku", (req, res) => {
     return res.status(401).json({ ok: false, message: "Not authenticated" });
 
   const { amazonSku, ebayItemId, multiplier, quantity } = req.body;
-
   if (!amazonSku || !ebayItemId)
     return res.status(400).json({ ok: false, message: "Missing required fields" });
 
@@ -116,12 +113,10 @@ app.post("/sync-now", async (req, res) => {
   if (!sku)
     return res.status(404).json({ ok: false, message: "SKU not registered" });
 
-  const finalQuantity = newQuantity ?? sku.quantity;
-
   const payload = {
     availability: {
       shipToLocationAvailability: {
-        quantity: finalQuantity
+        quantity: newQuantity ?? sku.quantity
       }
     }
   };
@@ -138,10 +133,14 @@ app.post("/sync-now", async (req, res) => {
     body: JSON.stringify(payload)
   });
 
-  const result = await response.json();
+  let result = {};
+  try {
+    result = await response.json();
+  } catch {
+    result = {};
+  }
 
   sku.lastSync = new Date().toISOString();
-
   res.json({ ok: true, ebayResponse: result });
 });
 
