@@ -30,7 +30,10 @@ app.get("/auth", (req, res) => {
     `client_id=${CLIENT_ID}` +
     `&response_type=code` +
     `&redirect_uri=${RUNAME}` +
-    `&scope=https://api.ebay.com/oauth/api_scope`;
+    `&scope=https://api.ebay.com/oauth/api_scope
+%20https://api.ebay.com/oauth/api_scope/sell.inventory
+%20https://api.ebay.com/oauth/api_scope/sell.account
+`;
 
   res.redirect(url);
 });
