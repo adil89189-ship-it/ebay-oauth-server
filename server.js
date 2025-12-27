@@ -10,9 +10,6 @@ app.get("/", (req, res) => {
   res.send("🟢 eBay Trading Sync LIVE");
 });
 
-/* ===============================
-   LIVE SYNC ENGINE
-================================ */
 app.post("/sync", async (req, res) => {
   try {
     const { itemId, price, quantity } = req.body;
