@@ -3,8 +3,9 @@ import { loadToken } from "./tokenStore.js";
 
 export async function reviseListing({ itemId, price, quantity }) {
   const token = loadToken();
+
   if (!token || !token.access_token) {
-    return { ok: false, error: "Not authenticated" };
+    return { ok: false, error: "Missing OAuth token on server" };
   }
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
@@ -25,12 +26,13 @@ export async function reviseListing({ itemId, price, quantity }) {
       "Content-Type": "text/xml",
       "X-EBAY-API-CALL-NAME": "ReviseFixedPriceItem",
       "X-EBAY-API-SITEID": "3",
-      "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
-      "X-EBAY-API-IAF-TOKEN": token.access_token
+      "X-EBAY-API-COMPATIBILITY-LEVEL": "967"
     },
     body: xml
   });
 
-  const text = await res.text();
-  return { ok: true, raw: text };
+  const raw = await res.text();
+
+  // Return FULL eBay reply for debugging
+  return { ok: true, ebayRawResponse: raw };
 }
