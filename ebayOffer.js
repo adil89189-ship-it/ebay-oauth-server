@@ -3,9 +3,6 @@ import { loadToken } from "./tokenStore.js";
 
 const EBAY_API = "https://api.ebay.com";
 
-/**
- * Find existing offer for this SKU (if already bound)
- */
 async function findExistingOffer(sku, token) {
   const res = await fetch(
     `${EBAY_API}/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`,
@@ -25,9 +22,6 @@ async function findExistingOffer(sku, token) {
   return null;
 }
 
-/**
- * Create offer only if it doesn't already exist
- */
 async function createOfferIfMissing(sku, token) {
   const existingOffer = await findExistingOffer(sku, token);
   if (existingOffer) return existingOffer;
@@ -52,9 +46,6 @@ async function createOfferIfMissing(sku, token) {
   return data.offerId;
 }
 
-/**
- * Publish the offer (binds it to live listing)
- */
 async function publishOffer(offerId, token) {
   const res = await fetch(
     `${EBAY_API}/sell/inventory/v1/offer/${offerId}/publish`,
@@ -70,9 +61,6 @@ async function publishOffer(offerId, token) {
   return await res.text();
 }
 
-/**
- * Main binding function
- */
 export async function bindOffer(sku) {
   const token = loadToken();
   if (!token || !token.access_token)
