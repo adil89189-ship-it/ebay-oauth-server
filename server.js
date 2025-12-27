@@ -87,6 +87,9 @@ app.post("/register-sku", (req, res) => {
 
   res.json({ ok: true, message: "SKU registered" });
 });
+app.get("/", (req, res) => {
+  res.send("🟢 eBay Sync Server Running");
+});
 
 /* ============================
    SERVER START
