@@ -7,7 +7,7 @@ app.use(cors());
 app.use(express.json());
 
 /* ===============================
-   ENV CHECK
+   ENV
 ================================ */
 const {
   EBAY_CLIENT_ID,
@@ -21,14 +21,14 @@ if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET || !EBAY_REFRESH_TOKEN) {
 }
 
 /* ===============================
-   EBAY ENDPOINTS
+   EBAY URLS
 ================================ */
 const EBAY_OAUTH_URL =
   EBAY_ENV === "production"
     ? "https://api.ebay.com/identity/v1/oauth2/token"
     : "https://api.sandbox.ebay.com/identity/v1/oauth2/token";
 
-const EBAY_INVENTORY_TEST =
+const EBAY_INVENTORY_URL =
   EBAY_ENV === "production"
     ? "https://api.ebay.com/sell/inventory/v1/inventory_item"
     : "https://api.sandbox.ebay.com/sell/inventory/v1/inventory_item";
@@ -37,11 +37,11 @@ const EBAY_INVENTORY_TEST =
    HEALTH CHECK
 ================================ */
 app.get("/", (req, res) => {
-  res.send("✅ eBay Sync Server Running");
+  res.send("✅ eBay Sync Server Running (INVENTORY)");
 });
 
 /* ===============================
-   DEBUG — TOKEN REFRESH
+   DEBUG — TOKEN
 ================================ */
 app.get("/debug/token", async (req, res) => {
   try {
@@ -52,7 +52,7 @@ app.get("/debug/token", async (req, res) => {
     const response = await fetch(EBAY_OAUTH_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Basic ${auth}`,
+        Authorization: `Basic ${auth}`,
         "Content-Type": "application/x-www-form-urlencoded"
       },
       body: new URLSearchParams({
@@ -91,11 +91,10 @@ app.get("/debug/inventory", async (req, res) => {
       `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
     ).toString("base64");
 
-    // 1. Refresh token
     const tokenRes = await fetch(EBAY_OAUTH_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Basic ${auth}`,
+        Authorization: `Basic ${auth}`,
         "Content-Type": "application/x-www-form-urlencoded"
       },
       body: new URLSearchParams({
@@ -110,15 +109,14 @@ app.get("/debug/inventory", async (req, res) => {
       return res.status(400).json({ error: "Token refresh failed", tokenData });
     }
 
-    // 2. Inventory API permission test
-    const invRes = await fetch(EBAY_INVENTORY_TEST, {
+    const testRes = await fetch(EBAY_INVENTORY_URL, {
       headers: {
         Authorization: `Bearer ${tokenData.access_token}`,
         "Content-Type": "application/json"
       }
     });
 
-    if (invRes.status === 403) {
+    if (testRes.status === 403) {
       return res.status(403).json({
         ok: false,
         error: "Inventory access denied"
@@ -128,6 +126,89 @@ app.get("/debug/inventory", async (req, res) => {
     res.json({
       ok: true,
       inventory_access: "granted"
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/* ===============================
+   TEST — INVENTORY UPDATE
+================================ */
+app.post("/sync/test", async (req, res) => {
+  try {
+    const { sku, price, quantity } = req.body;
+
+    if (!sku || price == null || quantity == null) {
+      return res.status(400).json({
+        ok: false,
+        error: "sku, price and quantity are required"
+      });
+    }
+
+    const auth = Buffer.from(
+      `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
+    ).toString("base64");
+
+    // Refresh token
+    const tokenRes = await fetch(EBAY_OAUTH_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: EBAY_REFRESH_TOKEN,
+        scope: "https://api.ebay.com/oauth/api_scope/sell.inventory"
+      })
+    });
+
+    const tokenData = await tokenRes.json();
+    if (!tokenData.access_token) {
+      return res.status(400).json({ error: "Token refresh failed", tokenData });
+    }
+
+    // Inventory update
+    const invRes = await fetch(
+      `${EBAY_INVENTORY_URL}/${sku}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${tokenData.access_token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          sku,
+          availability: {
+            shipToLocationAvailability: {
+              quantity
+            }
+          },
+          price: {
+            value: price,
+            currency: "GBP"
+          }
+        })
+      }
+    );
+
+    const invData = await invRes.json();
+
+    if (!invRes.ok) {
+      return res.status(invRes.status).json({
+        ok: false,
+        error: "Inventory update failed",
+        invData
+      });
+    }
+
+    res.json({
+      ok: true,
+      message: "Inventory updated successfully",
+      sku,
+      price,
+      quantity
     });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
