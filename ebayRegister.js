@@ -49,7 +49,8 @@ export async function registerSku(sku) {
       method: "PUT",
       headers: {
         Authorization: `Bearer ${token.access_token}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Content-Language": "en-GB"
       },
       body: JSON.stringify({
         availability: {
