@@ -12,17 +12,11 @@ app.use(express.json());
 const {
   EBAY_CLIENT_ID,
   EBAY_CLIENT_SECRET,
+  EBAY_REDIRECT_URI,
   EBAY_REFRESH_TOKEN,
   EBAY_ENV
 } = process.env;
 
-if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET || !EBAY_REFRESH_TOKEN) {
-  console.error("❌ Missing required environment variables");
-}
-
-/* ===============================
-   EBAY URLS
-================================ */
 const EBAY_OAUTH_URL =
   EBAY_ENV === "production"
     ? "https://api.ebay.com/identity/v1/oauth2/token"
@@ -30,195 +24,131 @@ const EBAY_OAUTH_URL =
 
 const EBAY_INVENTORY_URL =
   EBAY_ENV === "production"
-    ? "https://api.ebay.com/sell/inventory/v1/inventory_item"
-    : "https://api.sandbox.ebay.com/sell/inventory/v1/inventory_item";
+    ? "https://api.ebay.com/sell/inventory/v1"
+    : "https://api.sandbox.ebay.com/sell/inventory/v1";
+
+/* ===============================
+   HELPER — GET ACCESS TOKEN
+================================ */
+async function getAccessToken() {
+  const basicAuth = Buffer.from(
+    `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
+  ).toString("base64");
+
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: EBAY_REFRESH_TOKEN,
+    scope: "https://api.ebay.com/oauth/api_scope/sell.inventory"
+  });
+
+  const res = await fetch(EBAY_OAUTH_URL, {
+    method: "POST",
+    headers: {
+      "Authorization": `Basic ${basicAuth}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body
+  });
+
+  const data = await res.json();
+
+  if (!data.access_token) {
+    throw new Error("Failed to obtain access token");
+  }
+
+  return data.access_token;
+}
 
 /* ===============================
    HEALTH CHECK
 ================================ */
 app.get("/", (req, res) => {
-  res.send("✅ eBay Sync Server Running (INVENTORY)");
+  res.send("eBay OAuth & Inventory Server Running");
 });
 
 /* ===============================
-   DEBUG — TOKEN
+   DEBUG — TOKEN CHECK
 ================================ */
 app.get("/debug/token", async (req, res) => {
   try {
-    const auth = Buffer.from(
-      `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
-    ).toString("base64");
-
-    const response = await fetch(EBAY_OAUTH_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${auth}`,
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: EBAY_REFRESH_TOKEN,
-        scope: "https://api.ebay.com/oauth/api_scope/sell.inventory"
-      })
-    });
-
-    const data = await response.json();
-
-    if (!data.access_token) {
-      return res.status(400).json({
-        ok: false,
-        error: "Token refresh failed",
-        data
-      });
-    }
-
-    res.json({
-      ok: true,
-      access_token_generated: true,
-      expires_in: data.expires_in
-    });
+    const token = await getAccessToken();
+    res.json({ ok: true, token_valid: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 /* ===============================
-   DEBUG — INVENTORY ACCESS
-================================ */
-app.get("/debug/inventory", async (req, res) => {
-  try {
-    const auth = Buffer.from(
-      `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
-    ).toString("base64");
-
-    const tokenRes = await fetch(EBAY_OAUTH_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${auth}`,
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: EBAY_REFRESH_TOKEN,
-        scope: "https://api.ebay.com/oauth/api_scope/sell.inventory"
-      })
-    });
-
-    const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) {
-      return res.status(400).json({ error: "Token refresh failed", tokenData });
-    }
-
-    const testRes = await fetch(EBAY_INVENTORY_URL, {
-      headers: {
-        Authorization: `Bearer ${tokenData.access_token}`,
-        "Content-Type": "application/json"
-      }
-    });
-
-    if (testRes.status === 403) {
-      return res.status(403).json({
-        ok: false,
-        error: "Inventory access denied"
-      });
-    }
-
-    res.json({
-      ok: true,
-      inventory_access: "granted"
-    });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-/* ===============================
-   TEST — INVENTORY UPDATE
+   INVENTORY TEST (REAL UPDATE)
 ================================ */
 app.post("/sync/test", async (req, res) => {
   try {
     const { sku, price, quantity } = req.body;
 
-    if (!sku || price == null || quantity == null) {
-      return res.status(400).json({
+    if (!sku || price === undefined || quantity === undefined) {
+      return res.json({
         ok: false,
         error: "sku, price and quantity are required"
       });
     }
 
-    const auth = Buffer.from(
-      `${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`
-    ).toString("base64");
+    const accessToken = await getAccessToken();
 
-    // Refresh token
-    const tokenRes = await fetch(EBAY_OAUTH_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${auth}`,
-        "Content-Type": "application/x-www-form-urlencoded"
+    const payload = {
+      sku,
+      availability: {
+        shipToLocationAvailability: {
+          quantity: Number(quantity)
+        }
       },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: EBAY_REFRESH_TOKEN,
-        scope: "https://api.ebay.com/oauth/api_scope/sell.inventory"
-      })
-    });
+      pricingSummary: {
+        price: {
+          value: Number(price),
+          currency: "GBP"
+        }
+      }
+    };
 
-    const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) {
-      return res.status(400).json({ error: "Token refresh failed", tokenData });
-    }
-
-    // Inventory update
-    const invRes = await fetch(
-      `${EBAY_INVENTORY_URL}/${sku}`,
+    const response = await fetch(
+      `${EBAY_INVENTORY_URL}/inventory_item/${encodeURIComponent(sku)}`,
       {
         method: "PUT",
         headers: {
-          Authorization: `Bearer ${tokenData.access_token}`,
-          "Content-Type": "application/json"
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          "Accept-Language": "en-GB" // ✅ VALID (NOT Content-Language)
         },
-        body: JSON.stringify({
-          sku,
-          availability: {
-            shipToLocationAvailability: {
-              quantity
-            }
-          },
-          price: {
-            value: price,
-            currency: "GBP"
-          }
-        })
+        body: JSON.stringify(payload)
       }
     );
 
-    const invData = await invRes.json();
+    const data = await response.json();
 
-    if (!invRes.ok) {
-      return res.status(invRes.status).json({
+    if (!response.ok) {
+      return res.json({
         ok: false,
         error: "Inventory update failed",
-        invData
+        ebay: data
       });
     }
 
     res.json({
       ok: true,
-      message: "Inventory updated successfully",
-      sku,
-      price,
-      quantity
+      message: "Inventory update accepted",
+      sku
     });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({
+      ok: false,
+      error: err.message
+    });
   }
 });
 
 /* ===============================
    START SERVER
 ================================ */
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
