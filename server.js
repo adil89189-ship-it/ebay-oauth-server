@@ -5,7 +5,7 @@ import { reviseListing } from "./ebayTrading.js";
 const app = express();
 
 /* ===============================
-   CORS FIX (THIS IS CRITICAL)
+   CORS (Allow Chrome Extension)
 ================================ */
 app.use(cors({
   origin: "*",
@@ -13,37 +13,47 @@ app.use(cors({
   allowedHeaders: ["Content-Type"]
 }));
 
-// Handle preflight requests
 app.options("*", cors());
 
 app.use(express.json());
 
+/* ===============================
+   HEALTH CHECK
+================================ */
 app.get("/", (req, res) => {
   res.send("🟢 eBay Trading Sync LIVE");
 });
 
+/* ===============================
+   MAIN SYNC ENDPOINT
+================================ */
 app.post("/sync", async (req, res) => {
   try {
-    const { itemId, price, quantity } = req.body;
+    const { itemId, sku, price, quantity } = req.body;
+    const finalItemId = itemId || sku;
 
-    if (!itemId || typeof price !== "number" || typeof quantity !== "number") {
+    if (!finalItemId || typeof price !== "number" || typeof quantity !== "number") {
       return res.json({ ok: false, error: "Invalid payload" });
     }
 
     const safePrice = Math.max(Number(price.toFixed(2)), 0.99);
 
     const result = await reviseListing({
-      itemId,
+      itemId: finalItemId,
       price: safePrice,
       quantity
     });
 
     return res.json(result);
   } catch (err) {
+    console.error("SYNC ERROR:", err);
     return res.json({ ok: false, error: err.message });
   }
 });
 
+/* ===============================
+   START SERVER
+================================ */
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🟢 Server running on ${PORT}`);
