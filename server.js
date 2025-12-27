@@ -5,10 +5,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ===============================
-   CONFIG
-================================ */
 const EBAY_API = "https://api.ebay.com";
+
 let tokenStore = {
   access_token: null,
   refresh_token: null,
@@ -19,7 +17,7 @@ let tokenStore = {
    HEALTH
 ================================ */
 app.get("/", (req, res) => {
-  res.send("eBay Sync Server — LIVE");
+  res.send("🟢 eBay Sync Server LIVE");
 });
 
 /* ===============================
@@ -48,7 +46,7 @@ app.get("/oauth/callback", async (req, res) => {
 });
 
 /* ===============================
-   LIVE SYNC ENDPOINT
+   CORE SYNC ENGINE
 ================================ */
 app.post("/sync", async (req, res) => {
   try {
@@ -56,41 +54,55 @@ app.post("/sync", async (req, res) => {
       return res.json({ ok: false, error: "Not authenticated" });
     }
 
-    const { amazonPrice, multiplier, quantity, itemId } = req.body;
+    const { itemId, amazonPrice, multiplier, quantity } = req.body;
 
     const finalPrice = (amazonPrice * multiplier).toFixed(2);
 
-    const response = await fetch(
-      `${EBAY_API}/sell/inventory/v1/inventory_item/${itemId}`,
+    // 1️⃣ Find offerId from Item ID
+    const offerRes = await fetch(
+      `${EBAY_API}/sell/inventory/v1/offer?sku=${itemId}`,
       {
-        method: "PUT",
         headers: {
-          Authorization: `Bearer ${tokenStore.access_token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          availability: {
-            shipToLocationAvailability: { quantity }
-          },
-          price: {
-            value: finalPrice,
-            currency: "GBP"
-          }
-        })
+          Authorization: `Bearer ${tokenStore.access_token}`
+        }
       }
     );
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      return res.json({ ok: false, ebay: data });
+    const offerData = await offerRes.json();
+    if (!offerData.offers || !offerData.offers.length) {
+      return res.json({ ok: false, error: "Offer not found for item" });
     }
+
+    const offerId = offerData.offers[0].offerId;
+
+    // 2️⃣ Update offer
+    await fetch(`${EBAY_API}/sell/inventory/v1/offer/${offerId}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${tokenStore.access_token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        pricingSummary: {
+          price: { value: finalPrice, currency: "GBP" }
+        },
+        availableQuantity: quantity
+      })
+    });
+
+    // 3️⃣ Publish
+    await fetch(`${EBAY_API}/sell/inventory/v1/offer/${offerId}/publish`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${tokenStore.access_token}`
+      }
+    });
 
     res.json({
       ok: true,
       finalPrice,
       finalQuantity: quantity,
-      ebay: data
+      offerId
     });
 
   } catch (err) {
@@ -99,9 +111,9 @@ app.post("/sync", async (req, res) => {
 });
 
 /* ===============================
-   SERVER START
+   START SERVER
 ================================ */
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`🟢 LIVE Sync Server running on port ${PORT}`);
+  console.log(`🟢 Server running on ${PORT}`);
 });
