@@ -1,26 +1,25 @@
 import fetch from "node-fetch";
-import { loadToken } from "./tokenStore.js";
 
 export async function reviseListing({ itemId, price, quantity }) {
-  const token = loadToken();
+  const userToken = process.env.EBAY_TRADING_TOKEN;
 
-  if (!token || !token.access_token) {
-    return { ok: false, error: "Missing OAuth token on server" };
+  if (!userToken) {
+    return { ok: false, error: "EBAY_TRADING_TOKEN missing on server" };
   }
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
-  <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-    <RequesterCredentials>
-      <eBayAuthToken>${token.access_token}</eBayAuthToken>
-    </RequesterCredentials>
-    <Item>
-      <ItemID>${itemId}</ItemID>
-      <StartPrice>${price}</StartPrice>
-      <Quantity>${quantity}</Quantity>
-    </Item>
-  </ReviseFixedPriceItemRequest>`;
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${userToken}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <ItemID>${itemId}</ItemID>
+    <StartPrice>${price}</StartPrice>
+    <Quantity>${quantity}</Quantity>
+  </Item>
+</ReviseFixedPriceItemRequest>`;
 
-  const res = await fetch("https://api.ebay.com/ws/api.dll", {
+  const response = await fetch("https://api.ebay.com/ws/api.dll", {
     method: "POST",
     headers: {
       "Content-Type": "text/xml",
@@ -31,8 +30,6 @@ export async function reviseListing({ itemId, price, quantity }) {
     body: xml
   });
 
-  const raw = await res.text();
-
-  // Return FULL eBay reply for debugging
-  return { ok: true, ebayRawResponse: raw };
+  const raw = await response.text();
+  return { ok: true, ebayResponse: raw };
 }
