@@ -15,6 +15,13 @@ global.ebayToken = null;
 const skuStore = new Map();
 
 /* ============================
+   ROOT HEALTH CHECK
+============================ */
+app.get("/", (req, res) => {
+  res.send("🟢 eBay Sync Server Running");
+});
+
+/* ============================
    AUTH START
 ============================ */
 app.get("/auth", (req, res) => {
@@ -87,8 +94,48 @@ app.post("/register-sku", (req, res) => {
 
   res.json({ ok: true, message: "SKU registered" });
 });
-app.get("/", (req, res) => {
-  res.send("🟢 eBay Sync Server Running");
+
+/* ============================
+   LIVE EBAY SYNC ENGINE
+============================ */
+app.post("/sync-now", async (req, res) => {
+  if (!global.ebayToken) {
+    return res.status(401).json({ ok: false, message: "Not authenticated" });
+  }
+
+  const { amazonSku, newPrice, newQuantity } = req.body;
+
+  const sku = skuStore.get(amazonSku);
+  if (!sku) {
+    return res.status(404).json({ ok: false, message: "SKU not registered" });
+  }
+
+  const finalQuantity = newQuantity ?? sku.quantity;
+
+  const payload = {
+    availability: {
+      shipToLocationAvailability: {
+        quantity: finalQuantity
+      }
+    }
+  };
+
+  const url = `https://api.ebay.com/sell/inventory/v1/inventory_item/${sku.ebayItemId}`;
+
+  const response = await fetch(url, {
+    method: "PUT",
+    headers: {
+      "Authorization": `Bearer ${global.ebayToken.access_token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const result = await response.json();
+
+  sku.lastSync = new Date().toISOString();
+
+  res.json({ ok: true, ebayResponse: result });
 });
 
 /* ============================
