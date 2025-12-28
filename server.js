@@ -1,72 +1,70 @@
 import express from "express";
-import fetch from "node-fetch";
 import cors from "cors";
+import fs from "fs";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+const REGISTRY_FILE = "./registry.json";
+
 /* ===============================
-   HEALTH CHECK
+   UTILITIES
+================================ */
+
+function loadRegistry() {
+  if (!fs.existsSync(REGISTRY_FILE)) {
+    fs.writeFileSync(REGISTRY_FILE, "{}");
+  }
+  return JSON.parse(fs.readFileSync(REGISTRY_FILE, "utf8"));
+}
+
+function saveRegistry(data) {
+  fs.writeFileSync(REGISTRY_FILE, JSON.stringify(data, null, 2));
+}
+
+/* ===============================
+   HEALTH
 ================================ */
 app.get("/", (req, res) => {
-  res.send("🟢 eBay Sync Server Online");
+  res.send("🟢 eBay Sync Server Running — Phase 1 Active");
 });
 
 /* ===============================
-   MAIN SYNC ENDPOINT
+   REGISTRY SAVE
 ================================ */
-app.post("/sync", async (req, res) => {
-  try {
-    const { itemId, price, quantity } = req.body;
+app.post("/registry/save", (req, res) => {
+  const { amazonSku, ebayItemId, multiplier, defaultQty } = req.body;
 
-    if (!itemId || typeof price !== "number" || typeof quantity !== "number") {
-      return res.json({ ok: false, error: "Invalid payload" });
-    }
-
-    const token = process.env.EBAY_TRADING_TOKEN;
-    if (!token) {
-      return res.json({ ok: false, error: "Missing EBAY_TRADING_TOKEN" });
-    }
-
-    const safePrice = Math.max(Number(price.toFixed(2)), 0.99);
-
-    const xml = `<?xml version="1.0" encoding="utf-8"?>
-<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${token}</eBayAuthToken>
-  </RequesterCredentials>
-  <Item>
-    <ItemID>${itemId}</ItemID>
-    <StartPrice>${safePrice}</StartPrice>
-    <Quantity>${quantity}</Quantity>
-  </Item>
-</ReviseFixedPriceItemRequest>`;
-
-    const response = await fetch("https://api.ebay.com/ws/api.dll", {
-      method: "POST",
-      headers: {
-        "Content-Type": "text/xml",
-        "X-EBAY-API-CALL-NAME": "ReviseFixedPriceItem",
-        "X-EBAY-API-SITEID": "3",
-        "X-EBAY-API-COMPATIBILITY-LEVEL": "967"
-      },
-      body: xml
-    });
-
-    const raw = await response.text();
-
-    return res.json({ ok: true, ebayResponse: raw });
-
-  } catch (err) {
-    console.error("SYNC ERROR:", err);
-    return res.json({ ok: false, error: err.message });
+  if (!amazonSku || !ebayItemId) {
+    return res.json({ ok: false, error: "Missing SKU or Item ID" });
   }
+
+  const registry = loadRegistry();
+
+  registry[amazonSku] = {
+    amazonSku,
+    ebayItemId,
+    multiplier,
+    defaultQty,
+    updatedAt: Date.now()
+  };
+
+  saveRegistry(registry);
+
+  console.log("🧾 Registry Updated:", amazonSku);
+
+  res.json({ ok: true });
 });
 
 /* ===============================
-   START SERVER
+   REGISTRY LOAD
 ================================ */
+app.get("/registry/load", (req, res) => {
+  const registry = loadRegistry();
+  res.json({ ok: true, registry });
+});
+
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🟢 Server running on ${PORT}`);
