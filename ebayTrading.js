@@ -51,21 +51,9 @@ async function updateFBEPrice(sku, price) {
   });
 }
 
-export async function reviseListing({
-  parentItemId,
-  price,
-  quantity,
-  variationKey,
-  variationName,
-  variationValue
-}) {
-  if (!variationKey && variationName && variationValue) {
-    variationKey = `${variationName.replace(/\.$/, "")}. ${variationValue}`;
-  }
-
-  console.log("🚀 REVISE CALLED:", { parentItemId, price, quantity, variationKey });
-
+export async function reviseListing({ parentItemId, price, quantity, variationName, variationValue }) {
   const token = process.env.EBAY_TRADING_TOKEN;
+
   const raw = await getItem(parentItemId, token);
 
   if (raw.includes("<FulfillmentProgram>EBAY_FULFILLMENT</FulfillmentProgram>")) {
@@ -75,7 +63,7 @@ export async function reviseListing({
     return { success: true };
   }
 
-  if (!variationKey || !raw.includes("<Variations>")) {
+  if (!raw.includes("<Variations>")) {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
@@ -90,27 +78,24 @@ export async function reviseListing({
     return { success: true };
   }
 
-  const [attrName, attrValue] = variationKey.split(".").map(v => v.trim());
+  // ===== VARIATION SAFE MODE =====
 
-  const variations = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)].map(v => v[1]);
+  const variationBlocks = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
 
-  let target = null;
-  for (const v of variations) {
-    const name = v.match(/<Name>(.*?)<\/Name>/)?.[1];
-    const value = v.match(/<Value>(.*?)<\/Value>/)?.[1];
-    if (name === attrName && value === attrValue) {
-      target = v;
-      break;
+  const rebuiltVariations = variationBlocks.map(v => {
+    let block = v[1];
+
+    const name = block.match(/<Name>(.*?)<\/Name>/)?.[1];
+    const value = block.match(/<Value>(.*?)<\/Value>/)?.[1];
+
+    if (name === variationName && value === variationValue) {
+      block = block
+        .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`)
+        .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
     }
-  }
 
-  if (!target) {
-    console.log("⚠️ VARIATION NOT FOUND:", variationKey);
-    return { success: false, error: "Variation not found" };
-  }
-
-  const sku = target.match(/<SKU>(.*?)<\/SKU>/)?.[1];
-  if (!sku) throw new Error("Missing variation SKU");
+    return `<Variation>${block}</Variation>`;
+  }).join("\n");
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -118,20 +103,12 @@ export async function reviseListing({
 <Item>
 <ItemID>${parentItemId}</ItemID>
 <Variations>
-<Variation>
-<SKU>${sku}</SKU>
-<VariationSpecifics>
-<NameValueList><Name>${attrName}</Name><Value>${attrValue}</Value></NameValueList>
-</VariationSpecifics>
-<StartPrice>${price}</StartPrice>
-<Quantity>${quantity}</Quantity>
-</Variation>
+${rebuiltVariations}
 </Variations>
 </Item>
 </ReviseFixedPriceItemRequest>`;
 
   const result = await tradingRequest("ReviseFixedPriceItem", xml);
-  console.log("🔎 EBAY VARIATION RESPONSE:\n", result);
 
   if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
 
