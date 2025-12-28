@@ -1,9 +1,6 @@
 import fetch from "node-fetch";
 import { getInventoryToken } from "./inventoryAuth.js";
 
-/* ===============================
-   LOW LEVEL TRADING CALL
-================================ */
 async function tradingRequest(callName, xml) {
   const res = await fetch("https://api.ebay.com/ws/api.dll", {
     method: "POST",
@@ -21,9 +18,6 @@ async function tradingRequest(callName, xml) {
   return res.text();
 }
 
-/* ===============================
-   GET FULL ITEM DATA
-================================ */
 async function getItem(itemId, token) {
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -34,12 +28,8 @@ async function getItem(itemId, token) {
   return tradingRequest("GetItem", xml);
 }
 
-/* ===============================
-   FBE ENGINE (UNCHANGED)
-================================ */
 async function updateFBEPrice(sku, price) {
   const token = await getInventoryToken();
-
   const offers = await fetch(
     `https://api.ebay.com/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`,
     { headers: { Authorization: `Bearer ${token}` } }
@@ -51,30 +41,22 @@ async function updateFBEPrice(sku, price) {
 
   await fetch(`https://api.ebay.com/sell/inventory/v1/offer/${offerId}`, {
     method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      pricingSummary: { price: { value: price, currency: "GBP" } }
-    })
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ pricingSummary: { price: { value: price, currency: "GBP" } } })
   });
 
-  await fetch(
-    `https://api.ebay.com/sell/inventory/v1/offer/${offerId}/publish`,
-    { method: "POST", headers: { Authorization: `Bearer ${token}` } }
-  );
+  await fetch(`https://api.ebay.com/sell/inventory/v1/offer/${offerId}/publish`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` }
+  });
 }
 
-/* ===============================
-   MAIN SYNC ENGINE
-================================ */
 export async function reviseListing({ parentItemId, price, quantity, variationKey }) {
-  const token = process.env.EBAY_TRADING_TOKEN;
+  console.log("🚀 REVISE CALLED:", { parentItemId, price, quantity, variationKey });
 
+  const token = process.env.EBAY_TRADING_TOKEN;
   const raw = await getItem(parentItemId, token);
 
-  // FBE path
   if (raw.includes("<FulfillmentProgram>EBAY_FULFILLMENT</FulfillmentProgram>")) {
     const skuMatch = raw.match(/<SKU>(.*?)<\/SKU>/);
     if (!skuMatch) throw new Error("FBE SKU not found");
@@ -82,7 +64,6 @@ export async function reviseListing({ parentItemId, price, quantity, variationKe
     return { success: true };
   }
 
-  // If no variation requested, do normal update
   if (!variationKey || !raw.includes("<Variations>")) {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -95,35 +76,32 @@ export async function reviseListing({ parentItemId, price, quantity, variationKe
 </ReviseFixedPriceItemRequest>`;
     const result = await tradingRequest("ReviseFixedPriceItem", xml);
     if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
-    return { success: true, warning: result.includes("<Ack>Warning</Ack>") };
+    return { success: true };
   }
-
-  // ---------- VARIATION SAFE MODE ----------
 
   const [attrName, attrValue] = variationKey.split(".").map(v => v.trim());
 
   const variations = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)].map(v => v[1]);
 
-  let targetVariation = null;
-
+  let target = null;
   for (const v of variations) {
     const name = v.match(/<Name>(.*?)<\/Name>/)?.[1];
     const value = v.match(/<Value>(.*?)<\/Value>/)?.[1];
     if (name === attrName && value === attrValue) {
-      targetVariation = v;
+      target = v;
       break;
     }
   }
 
-  if (!targetVariation) {
-    console.log("⚠️ Variation not found on eBay:", variationKey);
-    return { success: false, error: "Variation not found on eBay" };
+  if (!target) {
+    console.log("⚠️ VARIATION NOT FOUND:", variationKey);
+    return { success: false, error: "Variation not found" };
   }
 
-  const sku = targetVariation.match(/<SKU>(.*?)<\/SKU>/)?.[1];
-  if (!sku) throw new Error("Variation SKU missing");
+  const sku = target.match(/<SKU>(.*?)<\/SKU>/)?.[1];
+  if (!sku) throw new Error("Missing variation SKU");
 
- const xml = `<?xml version="1.0" encoding="utf-8"?>
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
 <Item>
@@ -132,10 +110,7 @@ export async function reviseListing({ parentItemId, price, quantity, variationKe
 <Variation>
 <SKU>${sku}</SKU>
 <VariationSpecifics>
-  <NameValueList>
-    <Name>${attrName}</Name>
-    <Value>${attrValue}</Value>
-  </NameValueList>
+<NameValueList><Name>${attrName}</Name><Value>${attrValue}</Value></NameValueList>
 </VariationSpecifics>
 <StartPrice>${price}</StartPrice>
 <Quantity>${quantity}</Quantity>
@@ -143,8 +118,11 @@ export async function reviseListing({ parentItemId, price, quantity, variationKe
 </Variations>
 </Item>
 </ReviseFixedPriceItemRequest>`;
+
   const result = await tradingRequest("ReviseFixedPriceItem", xml);
+  console.log("🔎 EBAY VARIATION RESPONSE:\n", result);
+
   if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
 
-  return { success: true, warning: result.includes("<Ack>Warning</Ack>") };
+  return { success: true };
 }
