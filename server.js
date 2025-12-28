@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import fs from "fs";
+import { reviseListing } from "./ebayTrading.js";
 
 const app = express();
 app.use(cors());
@@ -24,7 +25,7 @@ function saveRegistry(data) {
    HEALTH
 ================================ */
 app.get("/", (req, res) => {
-  res.send("🟢 eBay Sync Server Running — Phase 1.2");
+  res.send("🟢 eBay Sync Server Running — PRODUCTION GATE ACTIVE");
 });
 
 /* ===============================
@@ -61,7 +62,7 @@ app.get("/registry/load", (req, res) => {
 });
 
 /* ===============================
-   CENTRAL SYNC ENDPOINT
+   CENTRAL PRODUCTION SYNC
 ================================ */
 app.post("/sync", async (req, res) => {
   const { itemId, price, quantity } = req.body;
@@ -70,13 +71,22 @@ app.post("/sync", async (req, res) => {
     return res.json({ ok: false, error: "Invalid sync payload" });
   }
 
-  console.log("🚀 SYNC REQUEST:", { itemId, price, quantity });
+  try {
+    console.log("🚀 EBAY PRODUCTION SYNC:", { itemId, price, quantity });
 
-  // 🔧 Your existing eBay Trading API update logic stays here
-  // You already confirmed this logic works in your stable baseline
+    const result = await reviseListing({ itemId, price, quantity });
 
-  // Simulated success response for now:
-  res.json({ ok: true });
+    if (!result.success) {
+      console.error("❌ EBAY API ERROR:", result.error);
+      return res.json({ ok: false, error: result.error });
+    }
+
+    res.json({ ok: true });
+  }
+  catch (err) {
+    console.error("❌ EBAY SYNC FAILURE:", err);
+    res.json({ ok: false, error: "Trading API failure" });
+  }
 });
 
 const PORT = process.env.PORT || 10000;
