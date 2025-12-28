@@ -1,41 +1,22 @@
 import express from "express";
 import cors from "cors";
-import fetch from "node-fetch";
+import { reviseListing } from "./ebayTrading.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ===============================
-   INVENTORY OAUTH ENGINE
-================================ */
+app.get("/", (req, res) => res.send("🟢 eBay Sync Engine LIVE"));
 
-let inventoryToken = null;
-let tokenExpiry = 0;
+app.post("/sync", async (req, res) => {
+  try {
+    const result = await reviseListing(req.body);
+    res.json({ ok: true, result });
+  } catch (err) {
+    console.error("❌ SYNC ERROR:", err.message);
+    res.json({ ok: false, error: err.message });
+  }
+});
 
-async function getInventoryToken() {
-  if (inventoryToken && Date.now() < tokenExpiry) return inventoryToken;
-
-  const auth = Buffer.from(
-    `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
-  ).toString("base64");
-
-  const res = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${auth}`,
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body:
-      "grant_type=client_credentials&scope=https://api.ebay.com/oauth/api_scope/sell.inventory"
-  });
-
-  const data = await res.json();
-
-  inventoryToken = data.access_token;
-  tokenExpiry = Date.now() + data.expires_in * 1000 - 60000;
-
-  return inventoryToken;
-}
-
-export { getInventoryToken };
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`🟢 Server running on ${PORT}`));
