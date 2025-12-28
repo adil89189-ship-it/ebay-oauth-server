@@ -51,7 +51,18 @@ async function updateFBEPrice(sku, price) {
   });
 }
 
-export async function reviseListing({ parentItemId, price, quantity, variationKey }) {
+export async function reviseListing({
+  parentItemId,
+  price,
+  quantity,
+  variationKey,
+  variationName,
+  variationValue
+}) {
+  if (!variationKey && variationName && variationValue) {
+    variationKey = `${variationName.replace(/\.$/, "")}. ${variationValue}`;
+  }
+
   console.log("🚀 REVISE CALLED:", { parentItemId, price, quantity, variationKey });
 
   const token = process.env.EBAY_TRADING_TOKEN;
