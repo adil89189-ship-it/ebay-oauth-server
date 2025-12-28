@@ -123,7 +123,7 @@ export async function reviseListing({ parentItemId, price, quantity, variationKe
   const sku = targetVariation.match(/<SKU>(.*?)<\/SKU>/)?.[1];
   if (!sku) throw new Error("Variation SKU missing");
 
-  const xml = `<?xml version="1.0" encoding="utf-8"?>
+ const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
 <Item>
@@ -131,13 +131,18 @@ export async function reviseListing({ parentItemId, price, quantity, variationKe
 <Variations>
 <Variation>
 <SKU>${sku}</SKU>
+<VariationSpecifics>
+  <NameValueList>
+    <Name>${attrName}</Name>
+    <Value>${attrValue}</Value>
+  </NameValueList>
+</VariationSpecifics>
 <StartPrice>${price}</StartPrice>
 <Quantity>${quantity}</Quantity>
 </Variation>
 </Variations>
 </Item>
 </ReviseFixedPriceItemRequest>`;
-
   const result = await tradingRequest("ReviseFixedPriceItem", xml);
   if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
 
