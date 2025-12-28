@@ -104,7 +104,13 @@ export async function reviseListing({ parentItemId, price, quantity }) {
 
   const result = await tradingRequest("ReviseFixedPriceItem", xml);
 
-  if (!result.includes("<Ack>Success</Ack>")) throw new Error(result);
+  // ✅ FIX: treat Warning as success, only fail on real failure
+  if (result.includes("<Ack>Failure</Ack>")) {
+    throw new Error(result);
+  }
 
-  return { success: true };
+  return {
+    success: true,
+    warning: result.includes("<Ack>Warning</Ack>")
+  };
 }
