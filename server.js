@@ -11,11 +11,8 @@ const REGISTRY_FILE = "./registry.json";
 /* ===============================
    UTILITIES
 ================================ */
-
 function loadRegistry() {
-  if (!fs.existsSync(REGISTRY_FILE)) {
-    fs.writeFileSync(REGISTRY_FILE, "{}");
-  }
+  if (!fs.existsSync(REGISTRY_FILE)) fs.writeFileSync(REGISTRY_FILE, "{}");
   return JSON.parse(fs.readFileSync(REGISTRY_FILE, "utf8"));
 }
 
@@ -27,7 +24,7 @@ function saveRegistry(data) {
    HEALTH
 ================================ */
 app.get("/", (req, res) => {
-  res.send("🟢 eBay Sync Server Running — Phase 1 Active");
+  res.send("🟢 eBay Sync Server Running — Phase 1.1");
 });
 
 /* ===============================
@@ -53,7 +50,6 @@ app.post("/registry/save", (req, res) => {
   saveRegistry(registry);
 
   console.log("🧾 Registry Updated:", amazonSku);
-
   res.json({ ok: true });
 });
 
