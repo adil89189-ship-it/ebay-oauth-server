@@ -24,7 +24,7 @@ function saveRegistry(data) {
    HEALTH
 ================================ */
 app.get("/", (req, res) => {
-  res.send("🟢 eBay Sync Server Running — Phase 1.1");
+  res.send("🟢 eBay Sync Server Running — Phase 1.2");
 });
 
 /* ===============================
@@ -48,7 +48,6 @@ app.post("/registry/save", (req, res) => {
   };
 
   saveRegistry(registry);
-
   console.log("🧾 Registry Updated:", amazonSku);
   res.json({ ok: true });
 });
@@ -59,6 +58,25 @@ app.post("/registry/save", (req, res) => {
 app.get("/registry/load", (req, res) => {
   const registry = loadRegistry();
   res.json({ ok: true, registry });
+});
+
+/* ===============================
+   CENTRAL SYNC ENDPOINT
+================================ */
+app.post("/sync", async (req, res) => {
+  const { itemId, price, quantity } = req.body;
+
+  if (!itemId || typeof price !== "number" || typeof quantity !== "number") {
+    return res.json({ ok: false, error: "Invalid sync payload" });
+  }
+
+  console.log("🚀 SYNC REQUEST:", { itemId, price, quantity });
+
+  // 🔧 Your existing eBay Trading API update logic stays here
+  // You already confirmed this logic works in your stable baseline
+
+  // Simulated success response for now:
+  res.json({ ok: true });
 });
 
 const PORT = process.env.PORT || 10000;
