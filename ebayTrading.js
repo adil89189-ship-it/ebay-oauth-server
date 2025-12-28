@@ -1,10 +1,12 @@
 import fetch from "node-fetch";
+import { getInventoryToken } from "./server.js";
 
 /* ===============================
    EBAY CORE REQUEST
 ================================ */
-async function ebayRequest(callName, xml) {
-  const response = await fetch("https://api.ebay.com/ws/api.dll", {
+
+async function tradingRequest(callName, xml) {
+  return fetch("https://api.ebay.com/ws/api.dll", {
     method: "POST",
     headers: {
       "Content-Type": "text/xml",
@@ -16,92 +18,89 @@ async function ebayRequest(callName, xml) {
       "X-EBAY-API-CERT-NAME": process.env.EBAY_CLIENT_SECRET
     },
     body: xml
-  });
-
-  return response.text();
+  }).then(r => r.text());
 }
 
 /* ===============================
    GET ITEM
 ================================ */
-async function getItemDetails(itemId, token) {
+
+async function getItem(itemId, token) {
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${token}</eBayAuthToken>
-  </RequesterCredentials>
-  <ItemID>${itemId}</ItemID>
-  <DetailLevel>ReturnAll</DetailLevel>
+<RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+<ItemID>${itemId}</ItemID>
+<DetailLevel>ReturnAll</DetailLevel>
 </GetItemRequest>`;
 
-  return ebayRequest("GetItem", xml);
+  return tradingRequest("GetItem", xml);
 }
 
 /* ===============================
-   FINAL VARIATION ENGINE
+   FBE PRICE ENGINE
 ================================ */
+
+async function updateFBEPrice(sku, price) {
+  const token = await getInventoryToken();
+
+  const offers = await fetch(
+    `https://api.ebay.com/sell/inventory/v1/offer?sku=${encodeURIComponent(
+      sku
+    )}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  ).then(r => r.json());
+
+  if (!offers.offers || !offers.offers.length)
+    throw new Error("No offer found for SKU");
+
+  const offerId = offers.offers[0].offerId;
+
+  await fetch(`https://api.ebay.com/sell/inventory/v1/offer/${offerId}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ pricingSummary: { price: { value: price, currency: "GBP" } } })
+  });
+
+  await fetch(
+    `https://api.ebay.com/sell/inventory/v1/offer/${offerId}/publish`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` }
+    }
+  );
+}
+
+/* ===============================
+   MAIN REVISE ROUTER
+================================ */
+
 export async function reviseListing({ parentItemId, variationName, variationValue, price, quantity }) {
   const token = process.env.EBAY_TRADING_TOKEN;
-  if (!token) return { success: false, error: "Missing EBAY_TRADING_TOKEN" };
 
-  // Simple listing
-  if (!variationName || !variationValue) {
-    const xml = `<?xml version="1.0" encoding="utf-8"?>
-<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${token}</eBayAuthToken>
-  </RequesterCredentials>
-  <Item>
-    <ItemID>${parentItemId}</ItemID>
-    <StartPrice>${price}</StartPrice>
-    <Quantity>${quantity}</Quantity>
-  </Item>
-</ReviseFixedPriceItemRequest>`;
+  const raw = await getItem(parentItemId, token);
 
-    const raw = await ebayRequest("ReviseFixedPriceItem", xml);
-    if (!raw.includes("<Ack>Success</Ack>")) return { success: false, error: raw };
+  const isFBE = raw.includes("<FulfillmentProgram>EBAY_FULFILLMENT</FulfillmentProgram>");
+
+  if (isFBE) {
+    const skuMatch = raw.match(/<SKU>(.*?)<\/SKU>/);
+    if (!skuMatch) throw new Error("FBE SKU not found");
+
+    await updateFBEPrice(skuMatch[1], price);
     return { success: true };
   }
 
-  // === VARIATION MODE ===
-  const rawItem = await getItemDetails(parentItemId, token);
-  if (!rawItem.includes("<Variations>")) return { success: false, error: "No variations found" };
-
-  const variationsBlock = rawItem.match(/<Variations>[\s\S]*?<\/Variations>/);
-  if (!variationsBlock) return { success: false, error: "Variations block missing" };
-
-  let variationsXML = variationsBlock[0];
-
-  const variationBlocks = variationsXML.match(/<Variation>[\s\S]*?<\/Variation>/g) || [];
-  let found = false;
-
-  for (const v of variationBlocks) {
-    if (v.includes(`<Name>${variationName}</Name>`) && v.includes(`<Value>${variationValue}</Value>`)) {
-      const updated = v
-        .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`)
-        .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
-
-      variationsXML = variationsXML.replace(v, updated);
-      found = true;
-      break;
-    }
-  }
-
-  if (!found) return { success: false, error: "Matching variation not found" };
-
-  const reviseXML = `<?xml version="1.0" encoding="utf-8"?>
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${token}</eBayAuthToken>
-  </RequesterCredentials>
-  <Item>
-    <ItemID>${parentItemId}</ItemID>
-    ${variationsXML}
-  </Item>
+<RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+<Item><ItemID>${parentItemId}</ItemID><StartPrice>${price}</StartPrice><Quantity>${quantity}</Quantity></Item>
 </ReviseFixedPriceItemRequest>`;
 
-  const result = await ebayRequest("ReviseFixedPriceItem", reviseXML);
-  if (!result.includes("<Ack>Success</Ack>")) return { success: false, error: result };
+  const res = await tradingRequest("ReviseFixedPriceItem", xml);
+
+  if (!res.includes("<Ack>Success</Ack>")) throw new Error(res);
 
   return { success: true };
 }
