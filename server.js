@@ -1,38 +1,37 @@
 import express from "express";
 import cors from "cors";
 import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { reviseListing } from "./ebayTrading.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-import path from "path";
-import { fileURLToPath } from "url";
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const REGISTRY_FILE = path.join(__dirname, "registry.json");
-
+const LOG_FILE = path.join(__dirname, "sync-log.json");
 
 /* ===============================
-   UTILITIES
+   FILE UTILITIES
 ================================ */
-function loadRegistry() {
-  if (!fs.existsSync(REGISTRY_FILE)) fs.writeFileSync(REGISTRY_FILE, "{}");
-  return JSON.parse(fs.readFileSync(REGISTRY_FILE, "utf8"));
+function loadFile(file, fallback = {}) {
+  if (!fs.existsSync(file)) fs.writeFileSync(file, JSON.stringify(fallback, null, 2));
+  return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
-function saveRegistry(data) {
-  fs.writeFileSync(REGISTRY_FILE, JSON.stringify(data, null, 2));
+function saveFile(file, data) {
+  fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
 /* ===============================
    HEALTH
 ================================ */
 app.get("/", (req, res) => {
-  res.send("🟢 eBay Sync Server Running — PRODUCTION GATE ACTIVE");
+  res.send("🟢 eBay Sync Server Running — PRODUCTION ACTIVE");
 });
 
 /* ===============================
@@ -40,12 +39,9 @@ app.get("/", (req, res) => {
 ================================ */
 app.post("/registry/save", (req, res) => {
   const { amazonSku, ebayItemId, multiplier, defaultQty } = req.body;
+  if (!amazonSku || !ebayItemId) return res.json({ ok: false, error: "Missing SKU or Item ID" });
 
-  if (!amazonSku || !ebayItemId) {
-    return res.json({ ok: false, error: "Missing SKU or Item ID" });
-  }
-
-  const registry = loadRegistry();
+  const registry = loadFile(REGISTRY_FILE);
 
   registry[amazonSku] = {
     amazonSku,
@@ -55,8 +51,7 @@ app.post("/registry/save", (req, res) => {
     updatedAt: Date.now()
   };
 
-  saveRegistry(registry);
-  console.log("🧾 Registry Updated:", amazonSku);
+  saveFile(REGISTRY_FILE, registry);
   res.json({ ok: true });
 });
 
@@ -64,39 +59,49 @@ app.post("/registry/save", (req, res) => {
    REGISTRY LOAD
 ================================ */
 app.get("/registry/load", (req, res) => {
-  const registry = loadRegistry();
+  const registry = loadFile(REGISTRY_FILE);
   res.json({ ok: true, registry });
 });
 
 /* ===============================
-   CENTRAL PRODUCTION SYNC
+   PRODUCTION SYNC ENGINE
 ================================ */
 app.post("/sync", async (req, res) => {
-  const { itemId, price, quantity } = req.body;
+  const { amazonSku, itemId, price, quantity } = req.body;
 
-  if (!itemId || typeof price !== "number" || typeof quantity !== "number") {
-    return res.json({ ok: false, error: "Invalid sync payload" });
+  if (!amazonSku || !itemId || typeof price !== "number" || typeof quantity !== "number") {
+    return res.json({ ok: false, error: "Invalid payload" });
   }
+
+  console.log("🚀 SYNC:", amazonSku, itemId, price, quantity);
+
+  const log = loadFile(LOG_FILE, {});
+  const today = new Date().toISOString().slice(0, 10);
 
   try {
-    console.log("🚀 EBAY PRODUCTION SYNC:", { itemId, price, quantity });
-
     const result = await reviseListing({ itemId, price, quantity });
 
-    if (!result.success) {
-      console.error("❌ EBAY API ERROR:", result.error);
-      return res.json({ ok: false, error: result.error });
-    }
+    if (!result.success) throw new Error(result.error || "Unknown API error");
 
-    res.json({ ok: true });
+    log[amazonSku] = { status: "success", date: today, time: Date.now() };
+    saveFile(LOG_FILE, log);
+
+    return res.json({ ok: true });
   }
   catch (err) {
-    console.error("❌ EBAY SYNC FAILURE:", err);
-    res.json({ ok: false, error: "Trading API failure" });
+    console.error("❌ SYNC ERROR:", err.message);
+
+    log[amazonSku] = { status: "fail", date: today, time: Date.now(), error: err.message };
+    saveFile(LOG_FILE, log);
+
+    return res.json({ ok: false, error: err.message });
   }
 });
 
+/* ===============================
+   SERVER
+================================ */
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`🟢 Server running on ${PORT}`);
+  console.log(`🟢 Server live on ${PORT}`);
 });
