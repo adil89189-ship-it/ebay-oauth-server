@@ -1,12 +1,11 @@
 import fetch from "node-fetch";
-import { getInventoryToken } from "./server.js";
+import { getInventoryToken } from "./inventoryAuth.js";
 
 /* ===============================
-   EBAY CORE REQUEST
+   TRADING API REQUEST
 ================================ */
-
 async function tradingRequest(callName, xml) {
-  return fetch("https://api.ebay.com/ws/api.dll", {
+  const res = await fetch("https://api.ebay.com/ws/api.dll", {
     method: "POST",
     headers: {
       "Content-Type": "text/xml",
@@ -18,13 +17,14 @@ async function tradingRequest(callName, xml) {
       "X-EBAY-API-CERT-NAME": process.env.EBAY_CLIENT_SECRET
     },
     body: xml
-  }).then(r => r.text());
+  });
+
+  return res.text();
 }
 
 /* ===============================
    GET ITEM
 ================================ */
-
 async function getItem(itemId, token) {
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -39,14 +39,11 @@ async function getItem(itemId, token) {
 /* ===============================
    FBE PRICE ENGINE
 ================================ */
-
 async function updateFBEPrice(sku, price) {
   const token = await getInventoryToken();
 
   const offers = await fetch(
-    `https://api.ebay.com/sell/inventory/v1/offer?sku=${encodeURIComponent(
-      sku
-    )}`,
+    `https://api.ebay.com/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`,
     { headers: { Authorization: `Bearer ${token}` } }
   ).then(r => r.json());
 
@@ -61,7 +58,9 @@ async function updateFBEPrice(sku, price) {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ pricingSummary: { price: { value: price, currency: "GBP" } } })
+    body: JSON.stringify({
+      pricingSummary: { price: { value: price, currency: "GBP" } }
+    })
   });
 
   await fetch(
@@ -74,15 +73,16 @@ async function updateFBEPrice(sku, price) {
 }
 
 /* ===============================
-   MAIN REVISE ROUTER
+   MAIN ROUTER
 ================================ */
-
-export async function reviseListing({ parentItemId, variationName, variationValue, price, quantity }) {
+export async function reviseListing({ parentItemId, price, quantity }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
   const raw = await getItem(parentItemId, token);
 
-  const isFBE = raw.includes("<FulfillmentProgram>EBAY_FULFILLMENT</FulfillmentProgram>");
+  const isFBE = raw.includes(
+    "<FulfillmentProgram>EBAY_FULFILLMENT</FulfillmentProgram>"
+  );
 
   if (isFBE) {
     const skuMatch = raw.match(/<SKU>(.*?)<\/SKU>/);
@@ -95,12 +95,16 @@ export async function reviseListing({ parentItemId, variationName, variationValu
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
-<Item><ItemID>${parentItemId}</ItemID><StartPrice>${price}</StartPrice><Quantity>${quantity}</Quantity></Item>
+<Item>
+<ItemID>${parentItemId}</ItemID>
+<StartPrice>${price}</StartPrice>
+<Quantity>${quantity}</Quantity>
+</Item>
 </ReviseFixedPriceItemRequest>`;
 
-  const res = await tradingRequest("ReviseFixedPriceItem", xml);
+  const result = await tradingRequest("ReviseFixedPriceItem", xml);
 
-  if (!res.includes("<Ack>Success</Ack>")) throw new Error(res);
+  if (!result.includes("<Ack>Success</Ack>")) throw new Error(result);
 
   return { success: true };
 }
