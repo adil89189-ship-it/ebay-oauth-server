@@ -1,14 +1,96 @@
 import fetch from "node-fetch";
 
-export async function reviseListing({ itemId, price, quantity }) {
-  try {
-    const userToken = process.env.EBAY_TRADING_TOKEN;
+/* ===============================
+   GET FULL EBAY ITEM
+================================ */
+async function getItemDetails(itemId, userToken) {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${userToken}</eBayAuthToken>
+  </RequesterCredentials>
+  <ItemID>${itemId}</ItemID>
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetItemRequest>`;
 
-    if (!userToken) {
-      return { success: false, error: "EBAY_TRADING_TOKEN missing on server" };
+  const res = await fetch("https://api.ebay.com/ws/api.dll", {
+    method: "POST",
+    headers: {
+      "Content-Type": "text/xml",
+      "X-EBAY-API-CALL-NAME": "GetItem",
+      "X-EBAY-API-SITEID": "3",
+      "X-EBAY-API-COMPATIBILITY-LEVEL": "967"
+    },
+    body: xml
+  });
+
+  return res.text();
+}
+
+/* ===============================
+   MAIN VARIATION ENGINE
+================================ */
+export async function reviseListing({ parentItemId, variationName, variationValue, price, quantity }) {
+  const userToken = process.env.EBAY_TRADING_TOKEN;
+  if (!userToken) return { success: false, error: "Missing EBAY_TRADING_TOKEN" };
+
+  // If no variation → normal update
+  if (!variationName || !variationValue) {
+    return reviseSimpleItem(parentItemId, price, quantity, userToken);
+  }
+
+  const raw = await getItemDetails(parentItemId, userToken);
+  if (!raw.includes("<Variations>")) return { success: false, error: "Listing has no variations" };
+
+  const matchBlock = raw.match(/<Variation>([\s\S]*?)<\/Variation>/g);
+
+  let targetBlock = null;
+
+  for (const block of matchBlock || []) {
+    if (
+      block.includes(`<Name>${variationName}</Name>`) &&
+      block.includes(`<Value>${variationValue}</Value>`)
+    ) {
+      targetBlock = block;
+      break;
     }
+  }
 
-    const xml = `<?xml version="1.0" encoding="utf-8"?>
+  if (!targetBlock) return { success: false, error: "Matching variation not found" };
+
+  const newBlock = targetBlock
+    .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`)
+    .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
+
+  const revisedXML = raw.replace(targetBlock, newBlock)
+    .replace("<GetItemResponse", "<ReviseFixedPriceItemRequest")
+    .replace("</GetItemResponse>", "</ReviseFixedPriceItemRequest>");
+
+  const res = await fetch("https://api.ebay.com/ws/api.dll", {
+    method: "POST",
+    headers: {
+      "Content-Type": "text/xml",
+      "X-EBAY-API-CALL-NAME": "ReviseFixedPriceItem",
+      "X-EBAY-API-SITEID": "3",
+      "X-EBAY-API-COMPATIBILITY-LEVEL": "967"
+    },
+    body: revisedXML
+  });
+
+  const result = await res.text();
+
+  if (!result.includes("<Ack>Success</Ack>")) {
+    return { success: false, error: result };
+  }
+
+  return { success: true };
+}
+
+/* ===============================
+   SIMPLE ITEM UPDATE
+================================ */
+async function reviseSimpleItem(itemId, price, quantity, userToken) {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
     <eBayAuthToken>${userToken}</eBayAuthToken>
@@ -20,26 +102,22 @@ export async function reviseListing({ itemId, price, quantity }) {
   </Item>
 </ReviseFixedPriceItemRequest>`;
 
-    const response = await fetch("https://api.ebay.com/ws/api.dll", {
-      method: "POST",
-      headers: {
-        "Content-Type": "text/xml",
-        "X-EBAY-API-CALL-NAME": "ReviseFixedPriceItem",
-        "X-EBAY-API-SITEID": "3",
-        "X-EBAY-API-COMPATIBILITY-LEVEL": "967"
-      },
-      body: xml
-    });
+  const response = await fetch("https://api.ebay.com/ws/api.dll", {
+    method: "POST",
+    headers: {
+      "Content-Type": "text/xml",
+      "X-EBAY-API-CALL-NAME": "ReviseFixedPriceItem",
+      "X-EBAY-API-SITEID": "3",
+      "X-EBAY-API-COMPATIBILITY-LEVEL": "967"
+    },
+    body: xml
+  });
 
-    const raw = await response.text();
+  const raw = await response.text();
 
-    if (!response.ok || raw.includes("<Ack>Failure</Ack>")) {
-      return { success: false, error: raw };
-    }
-
-    return { success: true, ebayResponse: raw };
+  if (!raw.includes("<Ack>Success</Ack>")) {
+    return { success: false, error: raw };
   }
-  catch (err) {
-    return { success: false, error: err.message || err };
-  }
+
+  return { success: true };
 }
