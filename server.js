@@ -1,35 +1,41 @@
 import express from "express";
 import cors from "cors";
-import { reviseListing } from "./ebayTrading.js";
+import fetch from "node-fetch";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get("/", (req, res) => res.send("🟢 eBay Variation Sync LIVE"));
-
 /* ===============================
-   SYNC ENDPOINT
+   INVENTORY OAUTH ENGINE
 ================================ */
-app.post("/sync", async (req, res) => {
-  const { amazonSku, parentItemId, variationName, variationValue, price, quantity } = req.body;
 
-  if (!amazonSku || !parentItemId || typeof price !== "number" || typeof quantity !== "number") {
-    return res.json({ ok: false, error: "Invalid payload" });
-  }
+let inventoryToken = null;
+let tokenExpiry = 0;
 
-  console.log("🚀 SYNC:", amazonSku, parentItemId, variationName, variationValue, price, quantity);
+async function getInventoryToken() {
+  if (inventoryToken && Date.now() < tokenExpiry) return inventoryToken;
 
-  try {
-    const result = await reviseListing({ parentItemId, variationName, variationValue, price, quantity });
-    if (!result.success) throw new Error(result.error);
+  const auth = Buffer.from(
+    `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
+  ).toString("base64");
 
-    res.json({ ok: true });
-  } catch (err) {
-    console.error("❌ SYNC ERROR:", err.message);
-    res.json({ ok: false, error: err.message });
-  }
-});
+  const res = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${auth}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body:
+      "grant_type=client_credentials&scope=https://api.ebay.com/oauth/api_scope/sell.inventory"
+  });
 
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🟢 Server running on ${PORT}`));
+  const data = await res.json();
+
+  inventoryToken = data.access_token;
+  tokenExpiry = Date.now() + data.expires_in * 1000 - 60000;
+
+  return inventoryToken;
+}
+
+export { getInventoryToken };
