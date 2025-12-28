@@ -53,9 +53,9 @@ async function updateFBEPrice(sku, price) {
 
 export async function reviseListing({ parentItemId, price, quantity, variationName, variationValue }) {
   const token = process.env.EBAY_TRADING_TOKEN;
-
   const raw = await getItem(parentItemId, token);
 
+  // ===== FBE HANDLING =====
   if (raw.includes("<FulfillmentProgram>EBAY_FULFILLMENT</FulfillmentProgram>")) {
     const skuMatch = raw.match(/<SKU>(.*?)<\/SKU>/);
     if (!skuMatch) throw new Error("FBE SKU not found");
@@ -63,6 +63,12 @@ export async function reviseListing({ parentItemId, price, quantity, variationNa
     return { success: true };
   }
 
+  // ===== OOS OVERRIDE RULE =====
+  if (quantity === 0) {
+    price = 0.99;
+  }
+
+  // ===== NON-VARIATION =====
   if (!raw.includes("<Variations>")) {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -79,7 +85,6 @@ export async function reviseListing({ parentItemId, price, quantity, variationNa
   }
 
   // ===== VARIATION SAFE MODE =====
-
   const variationBlocks = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
 
   const rebuiltVariations = variationBlocks.map(v => {
@@ -109,7 +114,6 @@ ${rebuiltVariations}
 </ReviseFixedPriceItemRequest>`;
 
   const result = await tradingRequest("ReviseFixedPriceItem", xml);
-
   if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
 
   return { success: true };
