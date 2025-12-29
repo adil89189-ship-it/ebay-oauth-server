@@ -69,31 +69,34 @@ export async function reviseListing({ parentItemId, price, quantity, variationNa
 
   const raw = await getItem(parentItemId, token);
 
-  // ===== FBE HANDLING =====
+  /* ===== FBE HANDLING ===== */
   if (raw.includes("<FulfillmentProgram>EBAY_FULFILLMENT</FulfillmentProgram>")) {
-    const skuMatch = raw.match(/<SKU>(.*?)<\/SKU>/);
-    if (!skuMatch) throw new Error("FBE SKU not found");
-    await updateFBEPrice(skuMatch[1], price);
+    if (price !== undefined) {
+      const skuMatch = raw.match(/<SKU>(.*?)<\/SKU>/);
+      if (!skuMatch) throw new Error("FBE SKU not found");
+      await updateFBEPrice(skuMatch[1], price);
+    }
     return { ok: true, success: true };
   }
 
-  // ===== NON-VARIATION =====
+  /* ===== NON-VARIATION ===== */
   if (!raw.includes("<Variations>")) {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
 <Item>
 <ItemID>${parentItemId}</ItemID>
-<StartPrice>${price}</StartPrice>
+${price !== undefined ? `<StartPrice>${price}</StartPrice>` : ``}
 <Quantity>${quantity}</Quantity>
 </Item>
 </ReviseFixedPriceItemRequest>`;
+
     const result = await tradingRequest("ReviseFixedPriceItem", xml);
     if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
     return { ok: true, success: true };
   }
 
-  // ===== VARIATION =====
+  /* ===== VARIATION ===== */
   const variationBlocks = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
 
   const rebuiltVariations = variationBlocks.map(v => {
@@ -102,9 +105,10 @@ export async function reviseListing({ parentItemId, price, quantity, variationNa
     const value = block.match(/<Value>(.*?)<\/Value>/)?.[1];
 
     if (name === variationName && value === variationValue) {
-      block = block
-        .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`)
-        .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
+      if (price !== undefined) {
+        block = block.replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`);
+      }
+      block = block.replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
     }
 
     return `<Variation>${block}</Variation>`;
