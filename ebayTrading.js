@@ -1,26 +1,55 @@
+import fetch from "node-fetch";
+
+/* ===============================
+   LOW-LEVEL EBAY REQUEST
+================================ */
+async function tradingRequest(callName, xml) {
+  const res = await fetch("https://api.ebay.com/ws/api.dll", {
+    method: "POST",
+    headers: {
+      "Content-Type": "text/xml",
+      "X-EBAY-API-CALL-NAME": callName,
+      "X-EBAY-API-SITEID": "3",
+      "X-EBAY-API-COMPATIBILITY-LEVEL": "1445",
+      "X-EBAY-API-APP-NAME": process.env.EBAY_CLIENT_ID,
+      "X-EBAY-API-DEV-NAME": process.env.EBAY_CLIENT_ID,
+      "X-EBAY-API-CERT-NAME": process.env.EBAY_CLIENT_SECRET
+    },
+    body: xml
+  });
+  return res.text();
+}
+
+/* ===============================
+   FETCH ITEM
+================================ */
+export async function getItem(itemId, token) {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+<RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+<ItemID>${itemId}</ItemID>
+<DetailLevel>ReturnAll</DetailLevel>
+</GetItemRequest>`;
+  return tradingRequest("GetItem", xml);
+}
+
+/* ===============================
+   MAIN SYNC ENTRY
+================================ */
 export async function reviseListing({ parentItemId, price, quantity, variationName, variationValue }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
-  // 🔒 AUTO-DS OOS RULE — FINAL & UNBREAKABLE
-  let finalPrice = price;
-  let finalQty   = quantity;
-
-  if (quantity <= 0 || price === 0.99) {
-    finalPrice = 0.99;   // parking price (eBay-safe)
-    finalQty   = 0;      // true OOS trigger
-  }
-
   const raw = await getItem(parentItemId, token);
 
-  // ===== NON-VARIATION =====
+  /* ===== NON-VARIATION ===== */
   if (!raw.includes("<Variations>")) {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
 <Item>
 <ItemID>${parentItemId}</ItemID>
-<StartPrice>${finalPrice}</StartPrice>
-<Quantity>${finalQty}</Quantity>
+<StartPrice>${price}</StartPrice>
+<Quantity>${quantity}</Quantity>
 </Item>
 </ReviseFixedPriceItemRequest>`;
 
@@ -29,7 +58,7 @@ export async function reviseListing({ parentItemId, price, quantity, variationNa
     return;
   }
 
-  // ===== VARIATION =====
+  /* ===== VARIATION ===== */
   const variationBlocks = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
 
   const rebuiltVariations = variationBlocks.map(v => {
@@ -39,8 +68,8 @@ export async function reviseListing({ parentItemId, price, quantity, variationNa
 
     if (name === variationName && value === variationValue) {
       block = block
-        .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${finalPrice}</StartPrice>`)
-        .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${finalQty}</Quantity>`);
+        .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`)
+        .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
     }
 
     return `<Variation>${block}</Variation>`;
