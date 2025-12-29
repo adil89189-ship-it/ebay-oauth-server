@@ -1,8 +1,5 @@
 import fetch from "node-fetch";
 
-/* ===============================
-   LOW-LEVEL EBAY REQUEST
-================================ */
 async function tradingRequest(callName, xml) {
   const res = await fetch("https://api.ebay.com/ws/api.dll", {
     method: "POST",
@@ -20,10 +17,7 @@ async function tradingRequest(callName, xml) {
   return res.text();
 }
 
-/* ===============================
-   FETCH ITEM
-================================ */
-export async function getItem(itemId, token) {
+async function getItem(itemId, token) {
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
@@ -33,15 +27,10 @@ export async function getItem(itemId, token) {
   return tradingRequest("GetItem", xml);
 }
 
-/* ===============================
-   MAIN SYNC ENTRY
-================================ */
 export async function reviseListing({ parentItemId, price, quantity, variationName, variationValue }) {
   const token = process.env.EBAY_TRADING_TOKEN;
-
   const raw = await getItem(parentItemId, token);
 
-  /* ===== NON-VARIATION ===== */
   if (!raw.includes("<Variations>")) {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -58,7 +47,6 @@ export async function reviseListing({ parentItemId, price, quantity, variationNa
     return;
   }
 
-  /* ===== VARIATION ===== */
   const variationBlocks = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
 
   const rebuiltVariations = variationBlocks.map(v => {
