@@ -60,12 +60,7 @@ export async function reviseListing({ parentItemId, price, quantity, variationNa
     const skuMatch = raw.match(/<SKU>(.*?)<\/SKU>/);
     if (!skuMatch) throw new Error("FBE SKU not found");
     await updateFBEPrice(skuMatch[1], price);
-    return { success: true };
-  }
-
-  // ===== OOS OVERRIDE RULE =====
-  if (quantity === 0) {
-    price = 0.99;
+    return { ok: true, success: true };
   }
 
   // ===== NON-VARIATION =====
@@ -81,10 +76,10 @@ export async function reviseListing({ parentItemId, price, quantity, variationNa
 </ReviseFixedPriceItemRequest>`;
     const result = await tradingRequest("ReviseFixedPriceItem", xml);
     if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
-    return { success: true };
+    return { ok: true, success: true };
   }
 
-  // ===== VARIATION SAFE MODE =====
+  // ===== VARIATION =====
   const variationBlocks = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
 
   const rebuiltVariations = variationBlocks.map(v => {
@@ -116,5 +111,5 @@ ${rebuiltVariations}
   const result = await tradingRequest("ReviseFixedPriceItem", xml);
   if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
 
-  return { success: true };
+  return { ok: true, success: true };
 }
