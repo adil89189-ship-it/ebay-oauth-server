@@ -14,7 +14,7 @@ app.post("/sync", async (req, res) => {
   try {
     if (req.body.quantity === 0) {
       await setQuantityOnly(req.body.parentItemId, 0);
-      await reviseListing({ ...req.body, quantity: 1 }); // eBay requires non-zero for price
+      await reviseListing({ ...req.body, quantity: 1 });
     } else {
       await reviseListing(req.body);
     }
