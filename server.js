@@ -12,12 +12,12 @@ app.post("/sync", async (req, res) => {
   console.log("🧪 SYNC PAYLOAD:", JSON.stringify(req.body, null, 2));
 
   try {
-    const result = await reviseListing(req.body);
-    console.log("🟢 SYNC RESULT:", result);
-    res.json({ ok: true, result });
+    await reviseListing(req.body);
+    console.log("🟢 SYNC RESULT: OK");
+    res.json({ ok: true, success: true });
   } catch (err) {
     console.error("❌ SYNC ERROR:", err.message);
-    res.json({ ok: false, error: err.message });
+    res.json({ ok: false, success: false, error: err.message });
   }
 });
 
