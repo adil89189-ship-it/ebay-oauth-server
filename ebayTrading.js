@@ -1,5 +1,8 @@
 import fetch from "node-fetch";
 
+/* ===============================
+   EBAY LOW LEVEL REQUEST
+================================ */
 async function tradingRequest(callName, xml) {
   const res = await fetch("https://api.ebay.com/ws/api.dll", {
     method: "POST",
@@ -17,6 +20,9 @@ async function tradingRequest(callName, xml) {
   return res.text();
 }
 
+/* ===============================
+   GET ITEM
+================================ */
 async function getItem(itemId, token) {
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -27,17 +33,29 @@ async function getItem(itemId, token) {
   return tradingRequest("GetItem", xml);
 }
 
+/* ===============================
+   REVISE LISTING
+================================ */
 export async function reviseListing({ parentItemId, price, quantity, variationName, variationValue }) {
   const token = process.env.EBAY_TRADING_TOKEN;
   const raw = await getItem(parentItemId, token);
 
+  // =======================
+  // SIMPLE LISTING
+  // =======================
   if (!raw.includes("<Variations>")) {
+
+    let priceBlock = "";
+    if (price !== undefined && price !== null) {
+      priceBlock = `<StartPrice>${price}</StartPrice>`;
+    }
+
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
 <Item>
 <ItemID>${parentItemId}</ItemID>
-<StartPrice>${price}</StartPrice>
+${priceBlock}
 <Quantity>${quantity}</Quantity>
 </Item>
 </ReviseFixedPriceItemRequest>`;
@@ -47,6 +65,9 @@ export async function reviseListing({ parentItemId, price, quantity, variationNa
     return;
   }
 
+  // =======================
+  // VARIATION LISTING
+  // =======================
   const variationBlocks = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
 
   const rebuiltVariations = variationBlocks.map(v => {
@@ -55,9 +76,12 @@ export async function reviseListing({ parentItemId, price, quantity, variationNa
     const value = block.match(/<Value>(.*?)<\/Value>/)?.[1];
 
     if (name === variationName && value === variationValue) {
-      block = block
-        .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`)
-        .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
+
+      if (price !== undefined && price !== null) {
+        block = block.replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`);
+      }
+
+      block = block.replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
     }
 
     return `<Variation>${block}</Variation>`;
