@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { reviseListing } from "./ebayTrading.js";
+import { reviseListing, setQuantityOnly } from "./ebayTrading.js";
 
 const app = express();
 app.use(cors());
@@ -12,7 +12,13 @@ app.post("/sync", async (req, res) => {
   console.log("🧪 SYNC PAYLOAD:", JSON.stringify(req.body, null, 2));
 
   try {
-    await reviseListing(req.body);
+    if (req.body.quantity === 0) {
+      await setQuantityOnly(req.body.parentItemId, 0);
+      await reviseListing({ ...req.body, quantity: 1 }); // eBay requires non-zero for price
+    } else {
+      await reviseListing(req.body);
+    }
+
     console.log("🟢 SYNC RESULT: OK");
     res.json({ ok: true, success: true });
   } catch (err) {
