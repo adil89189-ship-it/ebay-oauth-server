@@ -33,12 +33,12 @@ async function refreshAccessToken(refreshToken) {
 export async function updateInventory({ sku, price, quantity }) {
   let token = loadToken();
   if (!token || !token.refresh_token)
-    return { ok: false, message: "Not authenticated" };
+    return { ok: false, success: false, message: "Not authenticated" };
 
   if (!token.access_token || Date.now() >= token.expires_at) {
     const newAccessToken = await refreshAccessToken(token.refresh_token);
     if (!newAccessToken)
-      return { ok: false, message: "Token refresh failed" };
+      return { ok: false, success: false, message: "Token refresh failed" };
 
     token = loadToken();
   }
@@ -65,5 +65,5 @@ export async function updateInventory({ sku, price, quantity }) {
   );
 
   const data = await res.text();
-  return { ok: true, response: data };
+  return { ok: true, success: true, response: data };
 }
