@@ -55,6 +55,11 @@ export async function reviseListing({ parentItemId, price, quantity, variationNa
   const token = process.env.EBAY_TRADING_TOKEN;
   const raw = await getItem(parentItemId, token);
 
+  // 🅾️ OOS PARKING RULE (your original working behavior)
+  if (quantity === 0) {
+    price = 0.99;   // parking price
+  }
+
   // ===== FBE HANDLING =====
   if (raw.includes("<FulfillmentProgram>EBAY_FULFILLMENT</FulfillmentProgram>")) {
     const skuMatch = raw.match(/<SKU>(.*?)<\/SKU>/);
@@ -84,7 +89,6 @@ export async function reviseListing({ parentItemId, price, quantity, variationNa
 
   const rebuiltVariations = variationBlocks.map(v => {
     let block = v[1];
-
     const name = block.match(/<Name>(.*?)<\/Name>/)?.[1];
     const value = block.match(/<Value>(.*?)<\/Value>/)?.[1];
 
