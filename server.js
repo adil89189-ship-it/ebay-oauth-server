@@ -14,8 +14,8 @@ app.post("/sync", async (req, res) => {
   try {
     const data = { ...req.body };
 
-    // 🧱 FINAL AUTODS-STYLE OOS RULE
-    if (data.price === 0.99) {
+    // 🧱 FINAL OOS RULE — authoritative
+    if (data.price === null || data.quantity === 0) {
       data.quantity = 0;
     }
 
