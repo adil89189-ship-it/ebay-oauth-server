@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { reviseListing, setQuantityOnly } from "./ebayTrading.js";
-
+import { reviseListing } from "./ebayTrading.js";
 const app = express();
 app.use(cors());
 app.use(express.json());
