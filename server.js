@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { reviseListing } from "./ebayTrading.js";
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -11,12 +12,14 @@ app.post("/sync", async (req, res) => {
   console.log("🧪 SYNC PAYLOAD:", JSON.stringify(req.body, null, 2));
 
   try {
-    if (req.body.quantity === 0) {
-      await setQuantityOnly(req.body.parentItemId, 0);
-      await reviseListing({ ...req.body, quantity: 1 });
-    } else {
-      await reviseListing(req.body);
+    const data = { ...req.body };
+
+    // 🧱 FINAL AUTODS-STYLE OOS RULE
+    if (data.price === 0.99) {
+      data.quantity = 0;
     }
+
+    await reviseListing(data);
 
     console.log("🟢 SYNC RESULT: OK");
     res.json({ ok: true, success: true });
