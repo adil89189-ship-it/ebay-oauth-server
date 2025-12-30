@@ -34,15 +34,15 @@ async function getItem(itemId, token) {
 }
 
 /* ===============================
-   REVISE LISTING — STABLE & FIXED
+   REVISE LISTING — FINAL FIX
 ================================ */
 export async function reviseListing({ parentItemId, price, quantity }) {
   const token = process.env.EBAY_TRADING_TOKEN;
   const raw = await getItem(parentItemId, token);
 
-  // =======================
-  // SIMPLE LISTING
-  // =======================
+  /* =======================
+     SIMPLE LISTING
+  ======================= */
   if (!raw.includes("<Variations>")) {
     let priceBlock = "";
     if (price !== undefined && price !== null) {
@@ -64,37 +64,37 @@ ${priceBlock}
     return;
   }
 
-  // =======================
-  // VARIATION LISTING — HARD QUANTITY LOCK
-  // =======================
-  const variationBlocks = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
+  /* =======================
+     VARIATION LISTING — CORRECT PATH
+     Price + Quantity via ReviseInventoryStatus
+  ======================= */
+  const variations = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
 
-  const rebuiltVariations = variationBlocks.map(v => {
-    let block = v[1];
+  const inventoryBlocks = variations.map(v => {
+    const block = v[1];
 
-    if (price !== undefined && price !== null && block.includes("<StartPrice>")) {
-      block = block.replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`);
+    const sku = block.match(/<SKU>(.*?)<\/SKU>/)?.[1];
+    if (!sku) return "";
+
+    let priceBlock = "";
+    if (price !== undefined && price !== null) {
+      priceBlock = `<StartPrice>${price}</StartPrice>`;
     }
 
-    // 🔒 LOCK quantity for EVERY variation
-    if (block.includes("<Quantity>")) {
-      block = block.replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
-    }
-
-    return `<Variation>${block}</Variation>`;
-  }).join("\n");
+    return `
+<InventoryStatus>
+  <SKU>${sku}</SKU>
+  ${priceBlock}
+  <Quantity>${quantity}</Quantity>
+</InventoryStatus>`;
+  }).join("");
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
-<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+<ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
-<Item>
-<ItemID>${parentItemId}</ItemID>
-<Variations>
-${rebuiltVariations}
-</Variations>
-</Item>
-</ReviseFixedPriceItemRequest>`;
+${inventoryBlocks}
+</ReviseInventoryStatusRequest>`;
 
-  const result = await tradingRequest("ReviseFixedPriceItem", xml);
+  const result = await tradingRequest("ReviseInventoryStatus", xml);
   if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
 }
