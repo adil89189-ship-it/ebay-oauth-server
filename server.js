@@ -1,33 +1,102 @@
-import express from "express";
-import cors from "cors";
-import { reviseListing } from "./ebayTrading.js";
+import fetch from "node-fetch";
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+/* ===============================
+   EBAY LOW LEVEL REQUEST
+================================ */
+async function tradingRequest(callName, xml) {
+  const res = await fetch("https://api.ebay.com/ws/api.dll", {
+    method: "POST",
+    headers: {
+      "Content-Type": "text/xml",
+      "X-EBAY-API-CALL-NAME": callName,
+      "X-EBAY-API-SITEID": "3",
+      "X-EBAY-API-COMPATIBILITY-LEVEL": "1445",
+      "X-EBAY-API-APP-NAME": process.env.EBAY_CLIENT_ID,
+      "X-EBAY-API-DEV-NAME": process.env.EBAY_CLIENT_ID,
+      "X-EBAY-API-CERT-NAME": process.env.EBAY_CLIENT_SECRET
+    },
+    body: xml
+  });
+  return res.text();
+}
 
-app.get("/", (req, res) => res.send("🟢 eBay Sync Engine LIVE"));
+/* ===============================
+   GET ITEM
+================================ */
+async function getItem(itemId, token) {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+<RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+<ItemID>${itemId}</ItemID>
+<DetailLevel>ReturnAll</DetailLevel>
+</GetItemRequest>`;
+  return tradingRequest("GetItem", xml);
+}
 
-app.post("/sync", async (req, res) => {
-  console.log("🧪 SYNC PAYLOAD:", JSON.stringify(req.body, null, 2));
+/* ===============================
+   REVISE LISTING — FIXED
+================================ */
+export async function reviseListing({ parentItemId, price, quantity }) {
+  const token = process.env.EBAY_TRADING_TOKEN;
+  const raw = await getItem(parentItemId, token);
 
-  try {
-    const data = { ...req.body };
-
-    // 🧱 FINAL OOS RULE — authoritative
-    if (data.price === null || data.quantity === 0) {
-      data.quantity = 0;
+  // =======================
+  // SIMPLE LISTING
+  // =======================
+  if (!raw.includes("<Variations>")) {
+    let priceBlock = "";
+    if (price !== undefined && price !== null) {
+      priceBlock = `<StartPrice>${price}</StartPrice>`;
     }
 
-    await reviseListing(data);
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+<RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+<Item>
+<ItemID>${parentItemId}</ItemID>
+${priceBlock}
+<Quantity>${quantity}</Quantity>
+</Item>
+</ReviseFixedPriceItemRequest>`;
 
-    console.log("🟢 SYNC RESULT: OK");
-    res.json({ ok: true, success: true });
-  } catch (err) {
-    console.error("❌ SYNC ERROR:", err.message);
-    res.json({ ok: false, success: false, error: err.message });
+    const result = await tradingRequest("ReviseFixedPriceItem", xml);
+    if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
+    return;
   }
-});
 
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🟢 Server running on ${PORT}`));
+  // =======================
+  // VARIATION LISTING — HARD RESET
+  // =======================
+  const variationBlocks = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
+
+  const rebuiltVariations = variationBlocks.map(v => {
+    let block = v[1];
+
+    if (price !== undefined && price !== null) {
+      if (block.includes("<StartPrice>")) {
+        block = block.replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`);
+      }
+    }
+
+    // 🧱 CRITICAL FIX: overwrite quantity for EVERY variation
+    if (block.includes("<Quantity>")) {
+      block = block.replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
+    }
+
+    return `<Variation>${block}</Variation>`;
+  }).join("\n");
+
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+<RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+<Item>
+<ItemID>${parentItemId}</ItemID>
+<Variations>
+${rebuiltVariations}
+</Variations>
+</Item>
+</ReviseFixedPriceItemRequest>`;
+
+  const result = await tradingRequest("ReviseFixedPriceItem", xml);
+  if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
+}
