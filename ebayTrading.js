@@ -1,4 +1,4 @@
-import fetch from "node-fetch";
+const fetch = globalThis.fetch;
 
 /* ===============================
    EBAY LOW LEVEL REQUEST
