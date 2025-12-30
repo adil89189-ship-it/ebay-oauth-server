@@ -1,6 +1,12 @@
 const fetch = globalThis.fetch;
 
 /* ===============================
+   GLOBAL VARIATION LOCK
+   Prevents concurrent commits
+================================ */
+let variationLock = Promise.resolve();
+
+/* ===============================
    EBAY LOW LEVEL REQUEST
 ================================ */
 async function tradingRequest(callName, xml) {
@@ -67,38 +73,41 @@ ${priceBlock}
   /* =======================
      VARIATION LISTING
   ======================= */
-  const variations = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
+  await (variationLock = variationLock.then(async () => {
 
-  const inventoryEntries = variations.map(v => {
-    const block = v[1];
-    const sku = block.match(/<SKU>(.*?)<\/SKU>/)?.[1];
-    if (!sku) return null;
+    const variations = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
 
-    let priceBlock = "";
-    if (price !== undefined && price !== null) {
-      priceBlock = `<StartPrice>${price}</StartPrice>`;
-    }
+    const inventoryEntries = variations.map(v => {
+      const block = v[1];
+      const sku = block.match(/<SKU>(.*?)<\/SKU>/)?.[1];
+      if (!sku) return null;
 
-    return `
+      let priceBlock = "";
+      if (price !== undefined && price !== null) {
+        priceBlock = `<StartPrice>${price}</StartPrice>`;
+      }
+
+      return `
 <InventoryStatus>
   <SKU>${sku}</SKU>
   ${priceBlock}
   <Quantity>${quantity}</Quantity>
 </InventoryStatus>`;
-  }).filter(Boolean);
+    }).filter(Boolean);
 
-  // 🚦 Send in safe batches of 4
-  for (let i = 0; i < inventoryEntries.length; i += 4) {
-    const batch = inventoryEntries.slice(i, i + 4).join("");
+    for (let i = 0; i < inventoryEntries.length; i += 4) {
+      const batch = inventoryEntries.slice(i, i + 4).join("");
 
-    const xml = `<?xml version="1.0" encoding="utf-8"?>
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
 <InventoryTrackingMethod>SKU</InventoryTrackingMethod>
 ${batch}
 </ReviseInventoryStatusRequest>`;
 
-    const result = await tradingRequest("ReviseInventoryStatus", xml);
-    if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
-  }
+      const result = await tradingRequest("ReviseInventoryStatus", xml);
+      if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
+    }
+
+  }));
 }
