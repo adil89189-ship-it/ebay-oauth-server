@@ -92,6 +92,7 @@ ${priceBlock}
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+<InventoryTrackingMethod>SKU</InventoryTrackingMethod>
 ${inventoryBlocks}
 </ReviseInventoryStatusRequest>`;
 
