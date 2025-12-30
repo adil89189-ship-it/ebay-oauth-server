@@ -34,7 +34,7 @@ async function getItem(itemId, token) {
 }
 
 /* ===============================
-   REVISE LISTING — FINAL FIX
+   REVISE LISTING — FINAL
 ================================ */
 export async function reviseListing({ parentItemId, price, quantity }) {
   const token = process.env.EBAY_TRADING_TOKEN;
@@ -65,16 +65,14 @@ ${priceBlock}
   }
 
   /* =======================
-     VARIATION LISTING — CORRECT PATH
-     Price + Quantity via ReviseInventoryStatus
+     VARIATION LISTING
   ======================= */
   const variations = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
 
-  const inventoryBlocks = variations.map(v => {
+  const inventoryEntries = variations.map(v => {
     const block = v[1];
-
     const sku = block.match(/<SKU>(.*?)<\/SKU>/)?.[1];
-    if (!sku) return "";
+    if (!sku) return null;
 
     let priceBlock = "";
     if (price !== undefined && price !== null) {
@@ -87,15 +85,20 @@ ${priceBlock}
   ${priceBlock}
   <Quantity>${quantity}</Quantity>
 </InventoryStatus>`;
-  }).join("");
+  }).filter(Boolean);
 
-  const xml = `<?xml version="1.0" encoding="utf-8"?>
+  // 🚦 Send in safe batches of 4
+  for (let i = 0; i < inventoryEntries.length; i += 4) {
+    const batch = inventoryEntries.slice(i, i + 4).join("");
+
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
 <InventoryTrackingMethod>SKU</InventoryTrackingMethod>
-${inventoryBlocks}
+${batch}
 </ReviseInventoryStatusRequest>`;
 
-  const result = await tradingRequest("ReviseInventoryStatus", xml);
-  if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
+    const result = await tradingRequest("ReviseInventoryStatus", xml);
+    if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
+  }
 }
