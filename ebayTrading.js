@@ -2,7 +2,6 @@ const fetch = globalThis.fetch;
 
 /* ===============================
    GLOBAL VARIATION LOCK
-   Prevents concurrent commits
 ================================ */
 let variationLock = Promise.resolve();
 
@@ -40,9 +39,9 @@ async function getItem(itemId, token) {
 }
 
 /* ===============================
-   REVISE LISTING — FINAL
+   REVISE LISTING — FINAL FIX
 ================================ */
-export async function reviseListing({ parentItemId, price, quantity }) {
+export async function reviseListing({ parentItemId, price, quantity, variationName, variationValue }) {
   const token = process.env.EBAY_TRADING_TOKEN;
   const raw = await getItem(parentItemId, token);
 
@@ -71,43 +70,52 @@ ${priceBlock}
   }
 
   /* =======================
-     VARIATION LISTING
+     VARIATION LISTING — TARGET EXACT SKU
   ======================= */
   await (variationLock = variationLock.then(async () => {
 
     const variations = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
 
-    const inventoryEntries = variations.map(v => {
+    let inventoryEntries = [];
+
+    for (const v of variations) {
       const block = v[1];
-      const sku = block.match(/<SKU>(.*?)<\/SKU>/)?.[1];
-      if (!sku) return null;
 
-      let priceBlock = "";
-      if (price !== undefined && price !== null) {
-        priceBlock = `<StartPrice>${price}</StartPrice>`;
-      }
+      if (
+        block.includes(`<Name>${variationName}</Name>`) &&
+        block.includes(`<Value>${variationValue}</Value>`)
+      ) {
+        const sku = block.match(/<SKU>(.*?)<\/SKU>/)?.[1];
+        if (!sku) throw new Error("Matching variation SKU not found");
 
-      return `
+        let priceBlock = "";
+        if (price !== undefined && price !== null) {
+          priceBlock = `<StartPrice>${price}</StartPrice>`;
+        }
+
+        inventoryEntries.push(`
 <InventoryStatus>
   <SKU>${sku}</SKU>
   ${priceBlock}
   <Quantity>${quantity}</Quantity>
-</InventoryStatus>`;
-    }).filter(Boolean);
+</InventoryStatus>`);
+        break;
+      }
+    }
 
-    for (let i = 0; i < inventoryEntries.length; i += 4) {
-      const batch = inventoryEntries.slice(i, i + 4).join("");
+    if (inventoryEntries.length === 0) {
+      throw new Error("Variation match not found in listing");
+    }
 
-      const xml = `<?xml version="1.0" encoding="utf-8"?>
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
 <InventoryTrackingMethod>SKU</InventoryTrackingMethod>
-${batch}
+${inventoryEntries.join("")}
 </ReviseInventoryStatusRequest>`;
 
-      const result = await tradingRequest("ReviseInventoryStatus", xml);
-      if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
-    }
+    const result = await tradingRequest("ReviseInventoryStatus", xml);
+    if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
 
   }));
 }
