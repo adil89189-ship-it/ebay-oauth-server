@@ -1,4 +1,3 @@
-import fetch from "node-fetch";
 
 /* ===============================
    EBAY LOW LEVEL REQUEST
