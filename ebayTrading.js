@@ -1,11 +1,6 @@
 const fetch = globalThis.fetch;
 
 /* ===============================
-   GLOBAL VARIATION LOCK
-================================ */
-let variationLock = Promise.resolve();
-
-/* ===============================
    EBAY LOW LEVEL REQUEST
 ================================ */
 async function tradingRequest(callName, xml) {
@@ -39,15 +34,15 @@ async function getItem(itemId, token) {
 }
 
 /* ===============================
-   REVISE LISTING — FINAL FIX
+   REVISE LISTING — FINAL STABLE
 ================================ */
 export async function reviseListing({ parentItemId, price, quantity, variationName, variationValue }) {
   const token = process.env.EBAY_TRADING_TOKEN;
   const raw = await getItem(parentItemId, token);
 
-  /* =======================
-     SIMPLE LISTING
-  ======================= */
+  // =======================
+  // SIMPLE LISTING
+  // =======================
   if (!raw.includes("<Variations>")) {
     let priceBlock = "";
     if (price !== undefined && price !== null) {
@@ -69,53 +64,29 @@ ${priceBlock}
     return;
   }
 
-  /* =======================
-     VARIATION LISTING — TARGET EXACT SKU
-  ======================= */
-  await (variationLock = variationLock.then(async () => {
-
-    const variations = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
-
-    let inventoryEntries = [];
-
-    for (const v of variations) {
-      const block = v[1];
-
-      if (
-        block.includes(`<Name>${variationName}</Name>`) &&
-        block.includes(`<Value>${variationValue}</Value>`)
-      ) {
-        const sku = block.match(/<SKU>(.*?)<\/SKU>/)?.[1];
-        if (!sku) throw new Error("Matching variation SKU not found");
-
-        let priceBlock = "";
-        if (price !== undefined && price !== null) {
-          priceBlock = `<StartPrice>${price}</StartPrice>`;
-        }
-
-        inventoryEntries.push(`
-<InventoryStatus>
-  <SKU>${sku}</SKU>
-  ${priceBlock}
-  <Quantity>${quantity}</Quantity>
-</InventoryStatus>`);
-        break;
-      }
-    }
-
-    if (inventoryEntries.length === 0) {
-      throw new Error("Variation match not found in listing");
-    }
-
-    const xml = `<?xml version="1.0" encoding="utf-8"?>
-<ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  // =======================
+  // VARIATION LISTING — CORRECT METHOD
+  // =======================
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
-<InventoryTrackingMethod>SKU</InventoryTrackingMethod>
-${inventoryEntries.join("")}
-</ReviseInventoryStatusRequest>`;
+<Item>
+<ItemID>${parentItemId}</ItemID>
+<Variations>
+  <Variation>
+    <VariationSpecifics>
+      <NameValueList>
+        <Name>${variationName}</Name>
+        <Value>${variationValue}</Value>
+      </NameValueList>
+    </VariationSpecifics>
+    <StartPrice>${price}</StartPrice>
+    <Quantity>${quantity}</Quantity>
+  </Variation>
+</Variations>
+</Item>
+</ReviseFixedPriceItemRequest>`;
 
-    const result = await tradingRequest("ReviseInventoryStatus", xml);
-    if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
-
-  }));
+  const result = await tradingRequest("ReviseFixedPriceItem", xml);
+  if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
 }
