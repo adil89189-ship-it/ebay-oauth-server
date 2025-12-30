@@ -34,9 +34,9 @@ async function getItem(itemId, token) {
 }
 
 /* ===============================
-   REVISE LISTING
+   REVISE LISTING — STABLE & FIXED
 ================================ */
-export async function reviseListing({ parentItemId, price, quantity, variationName, variationValue }) {
+export async function reviseListing({ parentItemId, price, quantity }) {
   const token = process.env.EBAY_TRADING_TOKEN;
   const raw = await getItem(parentItemId, token);
 
@@ -44,7 +44,6 @@ export async function reviseListing({ parentItemId, price, quantity, variationNa
   // SIMPLE LISTING
   // =======================
   if (!raw.includes("<Variations>")) {
-
     let priceBlock = "";
     if (price !== undefined && price !== null) {
       priceBlock = `<StartPrice>${price}</StartPrice>`;
@@ -66,21 +65,19 @@ ${priceBlock}
   }
 
   // =======================
-  // VARIATION LISTING
+  // VARIATION LISTING — HARD QUANTITY LOCK
   // =======================
   const variationBlocks = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
 
   const rebuiltVariations = variationBlocks.map(v => {
     let block = v[1];
-    const name = block.match(/<Name>(.*?)<\/Name>/)?.[1];
-    const value = block.match(/<Value>(.*?)<\/Value>/)?.[1];
 
-    if (name === variationName && value === variationValue) {
+    if (price !== undefined && price !== null && block.includes("<StartPrice>")) {
+      block = block.replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`);
+    }
 
-      if (price !== undefined && price !== null) {
-        block = block.replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`);
-      }
-
+    // 🔒 LOCK quantity for EVERY variation
+    if (block.includes("<Quantity>")) {
       block = block.replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
     }
 
