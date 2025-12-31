@@ -34,12 +34,12 @@ async function getItem(itemId, token) {
 }
 
 /* ===============================
-   REVISE LISTING — EBAY-SAFE FINAL ENGINE
+   REVISE LISTING — FINAL STABLE ENGINE
 ================================ */
 export async function reviseListing({ parentItemId, price, quantity, variationName, variationValue }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
-  // 1️⃣ Load full item
+  // 1️⃣ Load full item from eBay
   const raw = await getItem(parentItemId, token);
 
   // =======================
@@ -67,14 +67,14 @@ ${priceBlock}
   }
 
   // =======================
-  // VARIATION LISTING — EBAY SAFE UPDATE
+  // VARIATION LISTING — QUANTITY-SAFE ENGINE
   // =======================
-  const variations = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
+  const variations = raw.match(/<Variation>[\s\S]*?<\/Variation>/g) || [];
 
   let found = false;
 
-  const rebuiltVariations = variations.map(v => {
-    let block = v[1];
+  const rebuiltVariations = variations.map(fullBlock => {
+    let block = fullBlock;
 
     const name = block.match(/<Name>(.*?)<\/Name>/)?.[1];
     const value = block.match(/<Value>(.*?)<\/Value>/)?.[1];
@@ -82,22 +82,11 @@ ${priceBlock}
     if (name === variationName && value === variationValue) {
       found = true;
 
-      // Price
-      if (block.includes("<StartPrice>")) {
-        block = block.replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`);
-      } else {
-        block = block.replace("</VariationSpecifics>", `</VariationSpecifics><StartPrice>${price}</StartPrice>`);
-      }
-
-      // Quantity
-      if (block.includes("<Quantity>")) {
-        block = block.replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
-      } else {
-        block = block.replace("</StartPrice>", `</StartPrice><Quantity>${quantity}</Quantity>`);
-      }
+      block = block.replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`);
+      block = block.replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
     }
 
-    return block;   // 👈 DO NOT wrap here
+    return block;  // preserve everything else
   });
 
   if (!found) throw new Error("Target variation not found on listing");
@@ -108,7 +97,7 @@ ${priceBlock}
 <Item>
 <ItemID>${parentItemId}</ItemID>
 <Variations>
-${rebuiltVariations.map(v => `<Variation>${v}</Variation>`).join("\n")}
+${rebuiltVariations.join("\n")}
 </Variations>
 </Item>
 </ReviseFixedPriceItemRequest>`;
