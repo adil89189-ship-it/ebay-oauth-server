@@ -1,8 +1,8 @@
 import fetch from "node-fetch";
-import { ensureAccessToken } from "./ebayOffer.js";
+import { getInventoryToken } from "./inventoryAuth.js";
 
 export async function updateOfferQuantity(offerId, quantity) {
-  const token = await ensureAccessToken();
+  const accessToken = await getInventoryToken();
 
   const res = await fetch(
     `https://api.ebay.com/sell/inventory/v1/offer/${offerId}`,
