@@ -1,23 +1,3 @@
-const listingModeCache = new Map();
-
-async function isManagedBySKU(itemId, token) {
-  if (listingModeCache.has(itemId)) return listingModeCache.get(itemId);
-
-  const xml = `<?xml version="1.0" encoding="utf-8"?>
-<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${token}</eBayAuthToken>
-  </RequesterCredentials>
-  <ItemID>${itemId}</ItemID>
-</GetItemRequest>`;
-
-  const res = await tradingRequest("GetItem", xml);
-  const managed = res.includes("<InventoryTrackingMethod>SKU</InventoryTrackingMethod>");
-
-  listingModeCache.set(itemId, managed);
-  return managed;
-}
-
 const fetch = globalThis.fetch;
 
 /* ===============================
@@ -47,32 +27,40 @@ async function tradingRequest(callName, xml) {
 }
 
 /* ===============================
-   CORE ENGINE — FINAL
+   LISTING MODE DETECTOR (SAFE)
+================================ */
+const listingModeCache = new Map();
+
+async function isManagedBySKU(itemId, token) {
+  if (listingModeCache.has(itemId)) return listingModeCache.get(itemId);
+
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${token}</eBayAuthToken>
+  </RequesterCredentials>
+  <ItemID>${itemId}</ItemID>
+</GetItemRequest>`;
+
+  const res = await tradingRequest("GetItem", xml);
+  const managed = res.includes("<InventoryTrackingMethod>SKU</InventoryTrackingMethod>");
+
+  listingModeCache.set(itemId, managed);
+  return managed;
+}
+
+/* ===============================
+   CORE ENGINE — STABLE + FIXED
 ================================ */
 async function _reviseListing({ parentItemId, price, quantity, amazonSku }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
-  /* ---------------------------------
-     1️⃣ FORCE SKU TRACKING MODE
-     (required once, safe to repeat)
-  --------------------------------- */
-  const trackingXml = `<?xml version="1.0" encoding="utf-8"?>
-<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${token}</eBayAuthToken>
-  </RequesterCredentials>
-  <Item>
-    <ItemID>${parentItemId}</ItemID>
-    <InventoryTrackingMethod>SKU</InventoryTrackingMethod>
-  </Item>
-</ReviseFixedPriceItemRequest>`;
-
-  await tradingRequest("ReviseFixedPriceItem", trackingXml);
+  const managedBySKU = await isManagedBySKU(parentItemId, token);
 
   /* ---------------------------------
-     2️⃣ UPDATE PRICE (SAFE)
+     1️⃣ UPDATE PRICE (SAFE)
   --------------------------------- */
-  if (price !== undefined && price !== null) {
+  if (price !== undefined && price !== null && managedBySKU) {
     const priceXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
@@ -93,8 +81,8 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku }) {
   }
 
   /* ---------------------------------
-     3️⃣ FORCE ABSOLUTE QUANTITY
-     (ignores sold count, no drift)
+     2️⃣ FORCE ABSOLUTE QUANTITY
+     (no drift, respects legacy)
   --------------------------------- */
   const qtyXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -103,7 +91,7 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku }) {
   </RequesterCredentials>
   <InventoryStatus>
     <ItemID>${parentItemId}</ItemID>
-    <SKU>${amazonSku}</SKU>
+    ${managedBySKU ? `<SKU>${amazonSku}</SKU>` : ""}
     <Quantity>${quantity}</Quantity>
   </InventoryStatus>
 </ReviseInventoryStatusRequest>`;
