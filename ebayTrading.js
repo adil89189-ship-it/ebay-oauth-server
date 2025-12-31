@@ -52,7 +52,7 @@ async function inspectListing(itemId, token) {
 /* ===============================
    CORE ENGINE — FINAL
 ================================ */
-async function _reviseListing({ parentItemId, price, quantity, amazonSku, variationName, variationValue }) {
+async function _reviseListing({ parentItemId, price, quantity, amazonSku, variationName, variationValue, offerId }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
   const { isVariation, managedBySKU } = await inspectListing(parentItemId, token);
