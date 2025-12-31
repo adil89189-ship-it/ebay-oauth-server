@@ -1,4 +1,5 @@
 import fetch from "node-fetch";
+import { updateOfferQuantity } from "./offerQuantity.js";
 import { getInventoryToken } from "./inventoryAuth.js";
 
 /* ===============================
