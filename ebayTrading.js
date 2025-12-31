@@ -38,8 +38,68 @@ async function getItem(itemId, token) {
 ================================ */
 export async function reviseListing({ parentItemId, price, quantity, variationName, variationValue }) {
   const token = process.env.EBAY_TRADING_TOKEN;
+
+  // 1️⃣ Get full item including all variations
   const raw = await getItem(parentItemId, token);
 
+  // SIMPLE LISTING (unchanged)
+  if (!raw.includes("<Variations>")) {
+    let priceBlock = "";
+    if (price !== undefined && price !== null) {
+      priceBlock = `<StartPrice>${price}</StartPrice>`;
+    }
+
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+<RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+<Item>
+<ItemID>${parentItemId}</ItemID>
+${priceBlock}
+<Quantity>${quantity}</Quantity>
+</Item>
+</ReviseFixedPriceItemRequest>`;
+
+    const result = await tradingRequest("ReviseFixedPriceItem", xml);
+    if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
+    return;
+  }
+
+  // 2️⃣ Extract every variation from GetItem
+  const variations = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)].map(v => v[1]);
+
+  let found = false;
+
+  const rebuiltVariations = variations.map(block => {
+    const name = block.match(/<Name>(.*?)<\/Name>/)?.[1];
+    const value = block.match(/<Value>(.*?)<\/Value>/)?.[1];
+
+    if (name === variationName && value === variationValue) {
+      found = true;
+      return block
+        .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`)
+        .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
+    }
+
+    return block;
+  });
+
+  if (!found) throw new Error("Target variation not found on listing");
+
+  // 3️⃣ Send full variation set back to eBay
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+<RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+<Item>
+<ItemID>${parentItemId}</ItemID>
+<Variations>
+${rebuiltVariations.map(v => `<Variation>${v}</Variation>`).join("\n")}
+</Variations>
+</Item>
+</ReviseFixedPriceItemRequest>`;
+
+  const result = await tradingRequest("ReviseFixedPriceItem", xml);
+  if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
+}
   // =======================
   // SIMPLE LISTING
   // =======================
