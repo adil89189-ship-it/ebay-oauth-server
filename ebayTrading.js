@@ -1,7 +1,7 @@
 const fetch = globalThis.fetch;
 
 /* ===============================
-   GLOBAL VARIATION LOCK
+   GLOBAL LOCK
 ================================ */
 let variationLock = Promise.resolve();
 
@@ -26,12 +26,12 @@ async function tradingRequest(callName, xml) {
 }
 
 /* ===============================
-   INTERNAL ENGINE
+   CORE ENGINE
 ================================ */
-async function _reviseListing({ parentItemId, price, quantity, variationName, variationValue }) {
+async function _reviseListing({ parentItemId, price, quantity, amazonSku }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
-  // 1️⃣ Update price / structure safely
+  // 1️⃣ Price update (safe)
   if (price !== undefined && price !== null) {
     const priceXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -40,7 +40,7 @@ async function _reviseListing({ parentItemId, price, quantity, variationName, va
 <ItemID>${parentItemId}</ItemID>
 <Variations>
 <Variation>
-<SKU>${variationName}:${variationValue}</SKU>
+<SKU>${amazonSku}</SKU>
 <StartPrice>${price}</StartPrice>
 </Variation>
 </Variations>
@@ -49,19 +49,14 @@ async function _reviseListing({ parentItemId, price, quantity, variationName, va
     await tradingRequest("ReviseFixedPriceItem", priceXml);
   }
 
-  // 2️⃣ Force available stock (absolute, ignores sold count)
+  // 2️⃣ Absolute quantity overwrite (correct way)
   const qtyXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
 <InventoryStatus>
-  <ItemID>${parentItemId}</ItemID>
-  <Quantity>${quantity}</Quantity>
-  <VariationSpecifics>
-    <NameValueList>
-      <Name>${variationName}</Name>
-      <Value>${variationValue}</Value>
-    </NameValueList>
-  </VariationSpecifics>
+<ItemID>${parentItemId}</ItemID>
+<SKU>${amazonSku}</SKU>
+<Quantity>${quantity}</Quantity>
 </InventoryStatus>
 </ReviseInventoryStatusRequest>`;
 
@@ -70,7 +65,7 @@ async function _reviseListing({ parentItemId, price, quantity, variationName, va
 }
 
 /* ===============================
-   PUBLIC API — SERIALIZED
+   PUBLIC API
 ================================ */
 export async function reviseListing(data) {
   variationLock = variationLock.then(() => _reviseListing(data));
