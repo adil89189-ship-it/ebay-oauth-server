@@ -9,14 +9,22 @@ export async function updateOfferQuantity(offerId, quantity) {
     {
       method: "PUT",
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
         "Content-Language": "en-GB"
       },
-      body: JSON.stringify({ availableQuantity: quantity })
+      body: JSON.stringify({
+        availableQuantity: quantity
+      })
     }
   );
 
   const text = await res.text();
+
+  if (!res.ok) {
+    console.error("❌ Offer quantity update failed:", text);
+    throw new Error("Offer quantity update failed");
+  }
+
   return text;
 }
