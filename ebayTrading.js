@@ -69,25 +69,40 @@ ${priceBlock}
   // =======================
   // VARIATION LISTING (FULL PAYLOAD — REQUIRED BY EBAY)
   // =======================
-  const variations = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)].map(v => v[1]);
+  // =======================
+// VARIATION LISTING — EBAY SAFE UPDATE
+// =======================
+const variations = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
 
-  let found = false;
+let found = false;
 
-  const rebuiltVariations = variations.map(block => {
-    const name = block.match(/<Name>(.*?)<\/Name>/)?.[1];
-    const value = block.match(/<Value>(.*?)<\/Value>/)?.[1];
+const rebuiltVariations = variations.map(v => {
+  let block = v[1];
 
-    if (name === variationName && value === variationValue) {
-      found = true;
-      return block
-        .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`)
-        .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
+  const name = block.match(/<Name>(.*?)<\/Name>/)?.[1];
+  const value = block.match(/<Value>(.*?)<\/Value>/)?.[1];
+
+  if (name === variationName && value === variationValue) {
+    found = true;
+
+    if (block.includes("<StartPrice>")) {
+      block = block.replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`);
+    } else {
+      block = block.replace("</VariationSpecifics>", `</VariationSpecifics><StartPrice>${price}</StartPrice>`);
     }
 
-    return block;
-  });
+    if (block.includes("<Quantity>")) {
+      block = block.replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
+    } else {
+      block = block.replace("</StartPrice>", `</StartPrice><Quantity>${quantity}</Quantity>`);
+    }
+  }
 
-  if (!found) throw new Error("Target variation not found on listing");
+  return `<Variation>${block}</Variation>`;
+});
+
+if (!found) throw new Error("Target variation not found on listing");
+
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
