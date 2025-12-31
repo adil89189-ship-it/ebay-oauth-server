@@ -34,7 +34,7 @@ async function getItem(itemId, token) {
 }
 
 /* ===============================
-   REVISE LISTING — STABLE VARIATION FIX
+   REVISE LISTING — EBAY-SAFE FINAL ENGINE
 ================================ */
 export async function reviseListing({ parentItemId, price, quantity, variationName, variationValue }) {
   const token = process.env.EBAY_TRADING_TOKEN;
@@ -67,42 +67,40 @@ ${priceBlock}
   }
 
   // =======================
-  // VARIATION LISTING (FULL PAYLOAD — REQUIRED BY EBAY)
+  // VARIATION LISTING — EBAY SAFE UPDATE
   // =======================
-  // =======================
-// VARIATION LISTING — EBAY SAFE UPDATE
-// =======================
-const variations = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
+  const variations = [...raw.matchAll(/<Variation>([\s\S]*?)<\/Variation>/g)];
 
-let found = false;
+  let found = false;
 
-const rebuiltVariations = variations.map(v => {
-  let block = v[1];
+  const rebuiltVariations = variations.map(v => {
+    let block = v[1];
 
-  const name = block.match(/<Name>(.*?)<\/Name>/)?.[1];
-  const value = block.match(/<Value>(.*?)<\/Value>/)?.[1];
+    const name = block.match(/<Name>(.*?)<\/Name>/)?.[1];
+    const value = block.match(/<Value>(.*?)<\/Value>/)?.[1];
 
-  if (name === variationName && value === variationValue) {
-    found = true;
+    if (name === variationName && value === variationValue) {
+      found = true;
 
-    if (block.includes("<StartPrice>")) {
-      block = block.replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`);
-    } else {
-      block = block.replace("</VariationSpecifics>", `</VariationSpecifics><StartPrice>${price}</StartPrice>`);
+      // Price
+      if (block.includes("<StartPrice>")) {
+        block = block.replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`);
+      } else {
+        block = block.replace("</VariationSpecifics>", `</VariationSpecifics><StartPrice>${price}</StartPrice>`);
+      }
+
+      // Quantity
+      if (block.includes("<Quantity>")) {
+        block = block.replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
+      } else {
+        block = block.replace("</StartPrice>", `</StartPrice><Quantity>${quantity}</Quantity>`);
+      }
     }
 
-    if (block.includes("<Quantity>")) {
-      block = block.replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
-    } else {
-      block = block.replace("</StartPrice>", `</StartPrice><Quantity>${quantity}</Quantity>`);
-    }
-  }
+    return block;   // 👈 DO NOT wrap here
+  });
 
-  return `<Variation>${block}</Variation>`;
-});
-
-if (!found) throw new Error("Target variation not found on listing");
-
+  if (!found) throw new Error("Target variation not found on listing");
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
