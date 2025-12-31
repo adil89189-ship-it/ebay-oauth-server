@@ -1,5 +1,4 @@
 import fetch from "node-fetch";
-import { updateOfferQuantity } from "./offerQuantity.js";
 import { getInventoryToken } from "./inventoryAuth.js";
 
 /* ===============================
@@ -9,7 +8,6 @@ import { getInventoryToken } from "./inventoryAuth.js";
 let quantityLock = Promise.resolve();
 
 export async function updateOfferQuantity(offerId, quantity) {
-  // Queue all quantity updates so eBay cannot race itself
   quantityLock = quantityLock.then(async () => {
     const accessToken = await getInventoryToken();
 
@@ -33,7 +31,7 @@ export async function updateOfferQuantity(offerId, quantity) {
       throw new Error("Offer quantity update failed");
     }
 
-    // Let eBay fully settle before the next quantity update
+    // Allow eBay systems to settle before next update
     await new Promise(r => setTimeout(r, 900));
   });
 
