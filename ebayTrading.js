@@ -66,7 +66,7 @@ ${priceBlock}
 <Quantity>${quantity}</Quantity>
 </Item>
 </ReviseFixedPriceItemRequest>`;
-
+console.log("➡️ EBAY REVISE XML:\n", xml);
     const result = await tradingRequest("ReviseFixedPriceItem", xml);
     if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
     return;
