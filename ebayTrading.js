@@ -1,12 +1,12 @@
 const fetch = globalThis.fetch;
 
 /* ===============================
-   GLOBAL LOCK
+   GLOBAL LOCK — prevents races
 ================================ */
 let variationLock = Promise.resolve();
 
 /* ===============================
-   EBAY REQUEST
+   EBAY LOW LEVEL REQUEST
 ================================ */
 async function tradingRequest(callName, xml) {
   const res = await fetch("https://api.ebay.com/ws/api.dll", {
@@ -22,60 +22,80 @@ async function tradingRequest(callName, xml) {
     },
     body: xml
   });
+
   return res.text();
 }
 
 /* ===============================
-   CORE ENGINE
+   CORE ENGINE — FINAL
 ================================ */
 async function _reviseListing({ parentItemId, price, quantity, amazonSku }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
-  // 1️⃣ Price update (safe)
-  if (price !== undefined && price !== null) {
-     const trackingXml = `<?xml version="1.0" encoding="utf-8"?>
+  /* ---------------------------------
+     1️⃣ FORCE SKU TRACKING MODE
+     (required once, safe to repeat)
+  --------------------------------- */
+  const trackingXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-<RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
-<Item>
-<ItemID>${parentItemId}</ItemID>
-<InventoryTrackingMethod>SKU</InventoryTrackingMethod>
-</Item>
+  <RequesterCredentials>
+    <eBayAuthToken>${token}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <ItemID>${parentItemId}</ItemID>
+    <InventoryTrackingMethod>SKU</InventoryTrackingMethod>
+  </Item>
 </ReviseFixedPriceItemRequest>`;
 
-await tradingRequest("ReviseFixedPriceItem", trackingXml);
+  await tradingRequest("ReviseFixedPriceItem", trackingXml);
+
+  /* ---------------------------------
+     2️⃣ UPDATE PRICE (SAFE)
+  --------------------------------- */
+  if (price !== undefined && price !== null) {
     const priceXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-<RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
-<Item>
-<ItemID>${parentItemId}</ItemID>
-<Variations>
-<Variation>
-<SKU>${amazonSku}</SKU>
-<StartPrice>${price}</StartPrice>
-</Variation>
-</Variations>
-</Item>
+  <RequesterCredentials>
+    <eBayAuthToken>${token}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <ItemID>${parentItemId}</ItemID>
+    <Variations>
+      <Variation>
+        <SKU>${amazonSku}</SKU>
+        <StartPrice>${price}</StartPrice>
+      </Variation>
+    </Variations>
+  </Item>
 </ReviseFixedPriceItemRequest>`;
+
     await tradingRequest("ReviseFixedPriceItem", priceXml);
   }
 
-  // 2️⃣ Absolute quantity overwrite (correct way)
+  /* ---------------------------------
+     3️⃣ FORCE ABSOLUTE QUANTITY
+     (ignores sold count, no drift)
+  --------------------------------- */
   const qtyXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-<RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
-<InventoryStatus>
-<ItemID>${parentItemId}</ItemID>
-<SKU>${amazonSku}</SKU>
-<Quantity>${quantity}</Quantity>
-</InventoryStatus>
+  <RequesterCredentials>
+    <eBayAuthToken>${token}</eBayAuthToken>
+  </RequesterCredentials>
+  <InventoryStatus>
+    <ItemID>${parentItemId}</ItemID>
+    <SKU>${amazonSku}</SKU>
+    <Quantity>${quantity}</Quantity>
+  </InventoryStatus>
 </ReviseInventoryStatusRequest>`;
 
   const result = await tradingRequest("ReviseInventoryStatus", qtyXml);
-  if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
+  if (result.includes("<Ack>Failure</Ack>")) {
+    throw new Error(result);
+  }
 }
 
 /* ===============================
-   PUBLIC API
+   PUBLIC API — SERIALIZED
 ================================ */
 export async function reviseListing(data) {
   variationLock = variationLock.then(() => _reviseListing(data));
