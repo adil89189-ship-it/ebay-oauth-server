@@ -52,14 +52,13 @@ async function inspectListing(itemId, token) {
 /* ===============================
    CORE ENGINE — FINAL
 ================================ */
-async function _reviseListing({ parentItemId, price, quantity, amazonSku }) {
+async function _reviseListing({ parentItemId, price, quantity, amazonSku, variationName, variationValue }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
   const { isVariation, managedBySKU } = await inspectListing(parentItemId, token);
 
   /* =================================================
-     VARIATION LISTINGS (LEGACY + MODERN)
-     → ONLY ReviseFixedPriceItem
+     VARIATION LISTINGS (ALL TYPES, INCLUDING FBE)
   ================================================= */
   if (isVariation) {
     const variationXml = `<?xml version="1.0" encoding="utf-8"?>
@@ -72,6 +71,12 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku }) {
         <SKU>${amazonSku}</SKU>
         ${price !== undefined && price !== null ? `<StartPrice>${price}</StartPrice>` : ``}
         <Quantity>${quantity}</Quantity>
+        <VariationSpecifics>
+          <NameValueList>
+            <Name>${variationName}</Name>
+            <Value>${variationValue}</Value>
+          </NameValueList>
+        </VariationSpecifics>
       </Variation>
     </Variations>
   </Item>
@@ -86,7 +91,6 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku }) {
      NON-VARIATION LISTINGS
   ================================================= */
 
-  /* PRICE (SKU-managed only) */
   if (price !== undefined && price !== null && managedBySKU) {
     const priceXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -100,7 +104,6 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku }) {
     await tradingRequest("ReviseFixedPriceItem", priceXml);
   }
 
-  /* QUANTITY (ABSOLUTE) */
   const qtyXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
