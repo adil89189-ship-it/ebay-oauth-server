@@ -1,3 +1,23 @@
+const listingModeCache = new Map();
+
+async function isManagedBySKU(itemId, token) {
+  if (listingModeCache.has(itemId)) return listingModeCache.get(itemId);
+
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${token}</eBayAuthToken>
+  </RequesterCredentials>
+  <ItemID>${itemId}</ItemID>
+</GetItemRequest>`;
+
+  const res = await tradingRequest("GetItem", xml);
+  const managed = res.includes("<InventoryTrackingMethod>SKU</InventoryTrackingMethod>");
+
+  listingModeCache.set(itemId, managed);
+  return managed;
+}
+
 const fetch = globalThis.fetch;
 
 /* ===============================
