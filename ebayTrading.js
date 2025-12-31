@@ -26,12 +26,12 @@ async function tradingRequest(callName, xml) {
 }
 
 /* ===============================
-   LISTING MODE DETECTOR
+   LISTING INSPECTOR (CACHED)
 ================================ */
-const listingModeCache = new Map();
+const listingCache = new Map();
 
-async function getListingMode(itemId, token) {
-  if (listingModeCache.has(itemId)) return listingModeCache.get(itemId);
+async function inspectListing(itemId, token) {
+  if (listingCache.has(itemId)) return listingCache.get(itemId);
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -41,60 +41,78 @@ async function getListingMode(itemId, token) {
 
   const res = await tradingRequest("GetItem", xml);
 
-  const managedBySKU = res.includes("<InventoryTrackingMethod>SKU</InventoryTrackingMethod>");
   const isVariation = res.includes("<Variations>");
+  const managedBySKU = res.includes("<InventoryTrackingMethod>SKU</InventoryTrackingMethod>");
 
-  const mode = isVariation ? "VARIATION" : (managedBySKU ? "SKU" : "ITEMID");
-  listingModeCache.set(itemId, mode);
-  return mode;
+  const info = { isVariation, managedBySKU };
+  listingCache.set(itemId, info);
+  return info;
 }
 
 /* ===============================
-   CORE ENGINE — FINAL FORM
+   CORE ENGINE — FINAL
 ================================ */
 async function _reviseListing({ parentItemId, price, quantity, amazonSku }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
-  const mode = await getListingMode(parentItemId, token);
+  const { isVariation, managedBySKU } = await inspectListing(parentItemId, token);
 
-  /* ---------------------------------
-     PRICE UPDATE (when allowed)
-  --------------------------------- */
-  if (price !== undefined && price !== null && (mode === "SKU" || mode === "VARIATION")) {
+  /* =================================================
+     VARIATION LISTINGS (LEGACY + MODERN)
+     → ONLY ReviseFixedPriceItem
+  ================================================= */
+  if (isVariation) {
+    const variationXml = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+  <Item>
+    <ItemID>${parentItemId}</ItemID>
+    <Variations>
+      <Variation>
+        <SKU>${amazonSku}</SKU>
+        ${price !== undefined && price !== null ? `<StartPrice>${price}</StartPrice>` : ``}
+        <Quantity>${quantity}</Quantity>
+      </Variation>
+    </Variations>
+  </Item>
+</ReviseFixedPriceItemRequest>`;
+
+    const res = await tradingRequest("ReviseFixedPriceItem", variationXml);
+    if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
+    return;
+  }
+
+  /* =================================================
+     NON-VARIATION LISTINGS
+  ================================================= */
+
+  /* PRICE (SKU-managed only) */
+  if (price !== undefined && price !== null && managedBySKU) {
     const priceXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
   <Item>
     <ItemID>${parentItemId}</ItemID>
-    ${mode === "VARIATION" ? `
-    <Variations>
-      <Variation>
-        <SKU>${amazonSku}</SKU>
-        <StartPrice>${price}</StartPrice>
-      </Variation>
-    </Variations>` : `
-    <StartPrice>${price}</StartPrice>`}
+    <StartPrice>${price}</StartPrice>
   </Item>
 </ReviseFixedPriceItemRequest>`;
 
     await tradingRequest("ReviseFixedPriceItem", priceXml);
   }
 
-  /* ---------------------------------
-     ABSOLUTE QUANTITY UPDATE
-  --------------------------------- */
+  /* QUANTITY (ABSOLUTE) */
   const qtyXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
   <InventoryStatus>
     <ItemID>${parentItemId}</ItemID>
-    ${(mode === "SKU" || mode === "VARIATION") ? `<SKU>${amazonSku}</SKU>` : ""}
+    ${managedBySKU ? `<SKU>${amazonSku}</SKU>` : ``}
     <Quantity>${quantity}</Quantity>
   </InventoryStatus>
 </ReviseInventoryStatusRequest>`;
 
-  const result = await tradingRequest("ReviseInventoryStatus", qtyXml);
-  if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
+  const res = await tradingRequest("ReviseInventoryStatus", qtyXml);
+  if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
 }
 
 /* ===============================
