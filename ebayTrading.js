@@ -1,6 +1,12 @@
 const fetch = globalThis.fetch;
 
 /* ===============================
+   GLOBAL VARIATION LOCK
+   Prevents concurrent commits
+================================ */
+let variationLock = Promise.resolve();
+
+/* ===============================
    EBAY LOW LEVEL REQUEST
 ================================ */
 async function tradingRequest(callName, xml) {
@@ -34,9 +40,9 @@ async function getItem(itemId, token) {
 }
 
 /* ===============================
-   REVISE LISTING — FINAL STABLE ENGINE
+   INTERNAL ENGINE (LOCKED)
 ================================ */
-export async function reviseListing({ parentItemId, price, quantity, variationName, variationValue }) {
+async function _reviseListing({ parentItemId, price, quantity, variationName, variationValue }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
   // 1️⃣ Load full item from eBay
@@ -81,7 +87,6 @@ ${priceBlock}
 
     if (name === variationName && value === variationValue) {
       found = true;
-
       block = block.replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`);
       block = block.replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
     }
@@ -104,4 +109,12 @@ ${rebuiltVariations.join("\n")}
 
   const result = await tradingRequest("ReviseFixedPriceItem", xml);
   if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
+}
+
+/* ===============================
+   PUBLIC API — SERIALIZED
+================================ */
+export async function reviseListing(data) {
+  variationLock = variationLock.then(() => _reviseListing(data));
+  return variationLock;
 }
