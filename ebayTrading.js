@@ -2,12 +2,11 @@ const fetch = globalThis.fetch;
 
 /* ===============================
    GLOBAL VARIATION LOCK
-   Prevents concurrent commits
 ================================ */
 let variationLock = Promise.resolve();
 
 /* ===============================
-   EBAY LOW LEVEL REQUEST
+   EBAY REQUEST
 ================================ */
 async function tradingRequest(callName, xml) {
   const res = await fetch("https://api.ebay.com/ws/api.dll", {
@@ -27,87 +26,46 @@ async function tradingRequest(callName, xml) {
 }
 
 /* ===============================
-   GET ITEM
-================================ */
-async function getItem(itemId, token) {
-  const xml = `<?xml version="1.0" encoding="utf-8"?>
-<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-<RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
-<ItemID>${itemId}</ItemID>
-<DetailLevel>ReturnAll</DetailLevel>
-</GetItemRequest>`;
-  return tradingRequest("GetItem", xml);
-}
-
-/* ===============================
-   INTERNAL ENGINE (LOCKED)
+   INTERNAL ENGINE
 ================================ */
 async function _reviseListing({ parentItemId, price, quantity, variationName, variationValue }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
-  // 1️⃣ Load full item from eBay
-  const raw = await getItem(parentItemId, token);
-
-  // =======================
-  // SIMPLE LISTING
-  // =======================
-  if (!raw.includes("<Variations>")) {
-    let priceBlock = "";
-    if (price !== undefined && price !== null) {
-      priceBlock = `<StartPrice>${price}</StartPrice>`;
-    }
-
-    const xml = `<?xml version="1.0" encoding="utf-8"?>
-<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-<RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
-<Item>
-<ItemID>${parentItemId}</ItemID>
-${priceBlock}
-<Quantity>${quantity}</Quantity>
-</Item>
-</ReviseFixedPriceItemRequest>`;
-console.log("➡️ EBAY REVISE XML:\n", xml);
-    const result = await tradingRequest("ReviseFixedPriceItem", xml);
-    if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
-    return;
-  }
-
-  // =======================
-  // VARIATION LISTING — QUANTITY-SAFE ENGINE
-  // =======================
-  const variations = raw.match(/<Variation>[\s\S]*?<\/Variation>/g) || [];
-
-  let found = false;
-
-  const rebuiltVariations = variations.map(fullBlock => {
-    let block = fullBlock;
-
-    const name = block.match(/<Name>(.*?)<\/Name>/)?.[1];
-    const value = block.match(/<Value>(.*?)<\/Value>/)?.[1];
-
-    if (name === variationName && value === variationValue) {
-      found = true;
-      block = block.replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`);
-      block = block.replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
-    }
-
-    return block;  // preserve everything else
-  });
-
-  if (!found) throw new Error("Target variation not found on listing");
-
-  const xml = `<?xml version="1.0" encoding="utf-8"?>
+  // 1️⃣ Update price / structure safely
+  if (price !== undefined && price !== null) {
+    const priceXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
 <Item>
 <ItemID>${parentItemId}</ItemID>
 <Variations>
-${rebuiltVariations.join("\n")}
+<Variation>
+<SKU>${variationName}:${variationValue}</SKU>
+<StartPrice>${price}</StartPrice>
+</Variation>
 </Variations>
 </Item>
 </ReviseFixedPriceItemRequest>`;
+    await tradingRequest("ReviseFixedPriceItem", priceXml);
+  }
 
-  const result = await tradingRequest("ReviseFixedPriceItem", xml);
+  // 2️⃣ Force available stock (absolute, ignores sold count)
+  const qtyXml = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+<RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+<InventoryStatus>
+  <ItemID>${parentItemId}</ItemID>
+  <Quantity>${quantity}</Quantity>
+  <VariationSpecifics>
+    <NameValueList>
+      <Name>${variationName}</Name>
+      <Value>${variationValue}</Value>
+    </NameValueList>
+  </VariationSpecifics>
+</InventoryStatus>
+</ReviseInventoryStatusRequest>`;
+
+  const result = await tradingRequest("ReviseInventoryStatus", qtyXml);
   if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
 }
 
