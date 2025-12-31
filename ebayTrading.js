@@ -1,3 +1,5 @@
+import { updateOfferQuantity } from "./offerQuantity.js";
+
 const fetch = globalThis.fetch;
 
 /* ===============================
@@ -84,6 +86,12 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, variat
 
     const res = await tradingRequest("ReviseFixedPriceItem", variationXml);
     if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
+
+    // 🆕 Sync Offer Layer
+    if (offerId) {
+      await updateOfferQuantity(offerId, quantity);
+    }
+
     return;
   }
 
@@ -116,6 +124,11 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, variat
 
   const res = await tradingRequest("ReviseInventoryStatus", qtyXml);
   if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
+
+  // 🆕 Sync Offer Layer
+  if (offerId) {
+    await updateOfferQuantity(offerId, quantity);
+  }
 }
 
 /* ===============================
