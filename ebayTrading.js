@@ -33,6 +33,16 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku }) {
 
   // 1️⃣ Price update (safe)
   if (price !== undefined && price !== null) {
+     const trackingXml = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+<RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+<Item>
+<ItemID>${parentItemId}</ItemID>
+<InventoryTrackingMethod>SKU</InventoryTrackingMethod>
+</Item>
+</ReviseFixedPriceItemRequest>`;
+
+await tradingRequest("ReviseFixedPriceItem", trackingXml);
     const priceXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
 <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
