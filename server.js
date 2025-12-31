@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
 import { reviseListing } from "./ebayTrading.js";
-import { updateOfferQuantity } from "./offerQuantity.js";
 
 const app = express();
 app.use(cors());
@@ -19,13 +18,8 @@ app.post("/sync", async (req, res) => {
       data.quantity = 0;
     }
 
-    // 1️⃣ Update listing price + structure
+    // ✅ Single source of truth: Trading API only
     await reviseListing(data);
-
-    // 2️⃣ Lock quantity via Inventory Offer (this is the missing piece)
-    if (data.offerId) {
-      await updateOfferQuantity(data.offerId, data.quantity);
-    }
 
     console.log("🟢 SYNC RESULT: OK");
     res.json({ ok: true, success: true });
