@@ -52,16 +52,13 @@ async function inspectListing(itemId, token) {
 }
 
 /* ===============================
-   CORE ENGINE — FINAL
+   CORE ENGINE — STABLE
 ================================ */
 async function _reviseListing({ parentItemId, price, quantity, amazonSku, variationName, variationValue, offerId }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
   const { isVariation, managedBySKU } = await inspectListing(parentItemId, token);
 
-  /* =================================================
-     VARIATION LISTINGS (ALL TYPES, INCLUDING FBE)
-  ================================================= */
   if (isVariation) {
     const variationXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -87,17 +84,9 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, variat
     const res = await tradingRequest("ReviseFixedPriceItem", variationXml);
     if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
 
-    // 🆕 Sync Offer Layer
-    if (offerId) {
-      await updateOfferQuantity(offerId, quantity);
-    }
-
+    if (offerId) await updateOfferQuantity(offerId, quantity);
     return;
   }
-
-  /* =================================================
-     NON-VARIATION LISTINGS
-  ================================================= */
 
   if (price !== undefined && price !== null && managedBySKU) {
     const priceXml = `<?xml version="1.0" encoding="utf-8"?>
@@ -125,10 +114,7 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, variat
   const res = await tradingRequest("ReviseInventoryStatus", qtyXml);
   if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
 
-  // 🆕 Sync Offer Layer
-  if (offerId) {
-    await updateOfferQuantity(offerId, quantity);
-  }
+  if (offerId) await updateOfferQuantity(offerId, quantity);
 }
 
 /* ===============================
