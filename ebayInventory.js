@@ -30,19 +30,20 @@ async function refreshAccessToken(refreshToken) {
   return data.access_token;
 }
 
-export async function updateInventory({ sku, price, quantity }) {
+export async function registerSku(sku) {
   let token = loadToken();
   if (!token || !token.refresh_token)
-    return { ok: false, success: false, message: "Not authenticated" };
+    return { ok: false, message: "Not authenticated" };
 
   if (!token.access_token || Date.now() >= token.expires_at) {
     const newAccessToken = await refreshAccessToken(token.refresh_token);
     if (!newAccessToken)
-      return { ok: false, success: false, message: "Token refresh failed" };
+      return { ok: false, message: "Token refresh failed" };
 
     token = loadToken();
   }
 
+  // 🛑 IMPORTANT: Do NOT touch quantity here
   const res = await fetch(
     `${EBAY_API}/sell/inventory/v1/inventory_item/${sku}`,
     {
@@ -53,17 +54,11 @@ export async function updateInventory({ sku, price, quantity }) {
         "Content-Language": "en-GB"
       },
       body: JSON.stringify({
-        availability: {
-          shipToLocationAvailability: { quantity }
-        },
-        price: {
-          value: price,
-          currency: "GBP"
-        }
+        product: { title: sku }  // minimal valid payload
       })
     }
   );
 
-  const data = await res.text();
-  return { ok: true, success: true, response: data };
+  const text = await res.text();
+  return { ok: true, response: text };
 }
