@@ -99,7 +99,6 @@ async function createOffer(sku, accessToken) {
       categoryId,
       merchantLocationKey: locationKey,
       listingPolicies: policies,
-      availableQuantity: 1,
       listingDescription: "Managed by Sync Engine"
     })
   });
