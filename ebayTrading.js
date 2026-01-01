@@ -52,10 +52,13 @@ async function inspectListing(itemId, token) {
 }
 
 /* ===============================
-   CORE ENGINE — STABLE
+   CORE ENGINE — FIXED
 ================================ */
 async function _reviseListing({ parentItemId, price, quantity, amazonSku, variationName, variationValue, offerId }) {
   const token = process.env.EBAY_TRADING_TOKEN;
+
+  // 🧯 HARD SANITIZE
+  const safeQty = Number.isFinite(Number(quantity)) ? Math.max(0, Number(quantity)) : 0;
 
   const { isVariation, managedBySKU } = await inspectListing(parentItemId, token);
 
@@ -69,7 +72,7 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, variat
       <Variation>
         <SKU>${amazonSku}</SKU>
         ${price !== undefined && price !== null ? `<StartPrice>${price}</StartPrice>` : ``}
-        <Quantity>${quantity}</Quantity>
+        <Quantity>${safeQty}</Quantity>
         <VariationSpecifics>
           <NameValueList>
             <Name>${variationName}</Name>
@@ -84,7 +87,7 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, variat
     const res = await tradingRequest("ReviseFixedPriceItem", variationXml);
     if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
 
-    if (offerId) await updateOfferQuantity(offerId, quantity);
+    if (offerId) await updateOfferQuantity(offerId, safeQty);
     return;
   }
 
@@ -107,14 +110,14 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, variat
   <InventoryStatus>
     <ItemID>${parentItemId}</ItemID>
     ${managedBySKU ? `<SKU>${amazonSku}</SKU>` : ``}
-    <Quantity>${quantity}</Quantity>
+    <Quantity>${safeQty}</Quantity>
   </InventoryStatus>
 </ReviseInventoryStatusRequest>`;
 
   const res = await tradingRequest("ReviseInventoryStatus", qtyXml);
   if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
 
-  if (offerId) await updateOfferQuantity(offerId, quantity);
+  if (offerId) await updateOfferQuantity(offerId, safeQty);
 }
 
 /* ===============================
