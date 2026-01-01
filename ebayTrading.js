@@ -52,9 +52,9 @@ async function inspectListing(itemId, token) {
 }
 
 /* ===============================
-   CORE ENGINE — FIXED
+   CORE ENGINE — FINAL FIX
 ================================ */
-async function _reviseListing({ parentItemId, price, quantity, amazonSku, variationName, variationValue, offerId }) {
+async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerId }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
   // 🧯 HARD SANITIZE
@@ -62,10 +62,13 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, variat
 
   const { isVariation, managedBySKU } = await inspectListing(parentItemId, token);
 
+  /* ===== VARIATION LISTING — FIXED ===== */
   if (isVariation) {
     const variationXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+  <RequesterCredentials>
+    <eBayAuthToken>${token}</eBayAuthToken>
+  </RequesterCredentials>
   <Item>
     <ItemID>${parentItemId}</ItemID>
     <Variations>
@@ -73,12 +76,6 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, variat
         <SKU>${amazonSku}</SKU>
         ${price !== undefined && price !== null ? `<StartPrice>${price}</StartPrice>` : ``}
         <Quantity>${safeQty}</Quantity>
-        <VariationSpecifics>
-          <NameValueList>
-            <Name>${variationName}</Name>
-            <Value>${variationValue}</Value>
-          </NameValueList>
-        </VariationSpecifics>
       </Variation>
     </Variations>
   </Item>
@@ -91,8 +88,9 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, variat
     return;
   }
 
+  /* ===== NORMAL LISTING — PRICE FIX ===== */
   if (price !== undefined && price !== null) {
-  const priceXml = `<?xml version="1.0" encoding="utf-8"?>
+    const priceXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
     <eBayAuthToken>${token}</eBayAuthToken>
@@ -106,11 +104,12 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, variat
   </Item>
 </ReviseFixedPriceItemRequest>`;
 
-  const res = await tradingRequest("ReviseFixedPriceItem", priceXml);
-  if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
-}
+    const res = await tradingRequest("ReviseFixedPriceItem", priceXml);
+    if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
+  }
 
-   const qtyXml = `<?xml version="1.0" encoding="utf-8"?>
+  /* ===== QUANTITY UPDATE ===== */
+  const qtyXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
   <InventoryStatus>
