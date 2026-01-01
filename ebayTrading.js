@@ -91,20 +91,26 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, variat
     return;
   }
 
-  if (price !== undefined && price !== null && managedBySKU) {
-    const priceXml = `<?xml version="1.0" encoding="utf-8"?>
+  if (price !== undefined && price !== null) {
+  const priceXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+  <RequesterCredentials>
+    <eBayAuthToken>${token}</eBayAuthToken>
+  </RequesterCredentials>
   <Item>
     <ItemID>${parentItemId}</ItemID>
     <StartPrice>${price}</StartPrice>
+    <ListingDetails>
+      <ConvertedStartPrice>${price}</ConvertedStartPrice>
+    </ListingDetails>
   </Item>
 </ReviseFixedPriceItemRequest>`;
 
-    await tradingRequest("ReviseFixedPriceItem", priceXml);
-  }
+  const res = await tradingRequest("ReviseFixedPriceItem", priceXml);
+  if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
+}
 
-  const qtyXml = `<?xml version="1.0" encoding="utf-8"?>
+   const qtyXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
   <InventoryStatus>
