@@ -8,6 +8,28 @@ const fetch = globalThis.fetch;
 let variationLock = Promise.resolve();
 
 /* ===============================
+   HARD EBAY THROTTLE — FIX 10007
+================================ */
+let lastCallTime = 0;
+
+async function safeTradingRequest(callName, xml) {
+  const now = Date.now();
+  const wait = Math.max(0, 1200 - (now - lastCallTime));
+  if (wait) await new Promise(r => setTimeout(r, wait));
+  lastCallTime = Date.now();
+
+  const res = await tradingRequest(callName, xml);
+
+  // Retry once on system failure
+  if (res.includes("<ErrorCode>10007</ErrorCode>")) {
+    await new Promise(r => setTimeout(r, 2500));
+    return tradingRequest(callName, xml);
+  }
+
+  return res;
+}
+
+/* ===============================
    EBAY LOW LEVEL REQUEST
 ================================ */
 async function tradingRequest(callName, xml) {
@@ -41,7 +63,7 @@ async function inspectListing(itemId, token) {
   <ItemID>${itemId}</ItemID>
 </GetItemRequest>`;
 
-  const res = await tradingRequest("GetItem", xml);
+  const res = await safeTradingRequest("GetItem", xml);
 
   const isVariation = res.includes("<Variations>");
   const managedBySKU = res.includes("<InventoryTrackingMethod>SKU</InventoryTrackingMethod>");
@@ -52,17 +74,16 @@ async function inspectListing(itemId, token) {
 }
 
 /* ===============================
-   CORE ENGINE — FINAL FIX
+   CORE ENGINE — STABLE
 ================================ */
 async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerId }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
-  // 🧯 HARD SANITIZE
   const safeQty = Number.isFinite(Number(quantity)) ? Math.max(0, Number(quantity)) : 0;
 
   const { isVariation, managedBySKU } = await inspectListing(parentItemId, token);
 
-  /* ===== VARIATION LISTING — FIXED ===== */
+  /* ===== VARIATION LISTING ===== */
   if (isVariation) {
     const variationXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -81,14 +102,14 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
   </Item>
 </ReviseFixedPriceItemRequest>`;
 
-    const res = await tradingRequest("ReviseFixedPriceItem", variationXml);
+    const res = await safeTradingRequest("ReviseFixedPriceItem", variationXml);
     if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
 
     if (offerId) await updateOfferQuantity(offerId, safeQty);
     return;
   }
 
-  /* ===== NORMAL LISTING — PRICE FIX ===== */
+  /* ===== NORMAL PRICE UPDATE ===== */
   if (price !== undefined && price !== null) {
     const priceXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -104,7 +125,7 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
   </Item>
 </ReviseFixedPriceItemRequest>`;
 
-    const res = await tradingRequest("ReviseFixedPriceItem", priceXml);
+    const res = await safeTradingRequest("ReviseFixedPriceItem", priceXml);
     if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
   }
 
@@ -119,7 +140,7 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
   </InventoryStatus>
 </ReviseInventoryStatusRequest>`;
 
-  const res = await tradingRequest("ReviseInventoryStatus", qtyXml);
+  const res = await safeTradingRequest("ReviseInventoryStatus", qtyXml);
   if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
 
   if (offerId) await updateOfferQuantity(offerId, safeQty);
