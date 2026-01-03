@@ -20,7 +20,6 @@ async function safeTradingRequest(callName, xml) {
 
   const res = await tradingRequest(callName, xml);
 
-  // Retry once on system failure
   if (res.includes("<ErrorCode>10007</ErrorCode>")) {
     await new Promise(r => setTimeout(r, 2500));
     return tradingRequest(callName, xml);
@@ -65,7 +64,8 @@ async function inspectListing(itemId, token) {
 
   const res = await safeTradingRequest("GetItem", xml);
 
-  const isVariation = res.includes("<Variations>");
+  const variationCount = (res.match(/<Variation>/g) || []).length;
+  const isVariation = variationCount > 1;
   const managedBySKU = res.includes("<InventoryTrackingMethod>SKU</InventoryTrackingMethod>");
 
   const info = { isVariation, managedBySKU };
@@ -83,8 +83,13 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
 
   const { isVariation, managedBySKU } = await inspectListing(parentItemId, token);
 
+  const hasVariationData =
+    variationName && variationValue &&
+    String(variationName).trim() !== "" &&
+    String(variationValue).trim() !== "";
+
   /* ===== VARIATION LISTING ===== */
-    if (isVariation) {
+  if (isVariation && hasVariationData) {
     const variationXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
@@ -115,7 +120,7 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
     return;
   }
 
-   /* ===== NORMAL PRICE UPDATE ===== */
+  /* ===== NORMAL PRICE UPDATE ===== */
   if (price !== undefined && price !== null) {
     const priceXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
