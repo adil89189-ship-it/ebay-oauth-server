@@ -1,11 +1,4 @@
-import { updateOfferQuantity } from "./offerQuantity.js";
-
-const fetch = globalThis.fetch;
-
-/* ===============================
-   GLOBAL LOCK — prevents races
-================================ */
-let variationLock = Promise.resolve();
+import fetch from "node-fetch";
 
 /* ===============================
    EBAY LOW LEVEL REQUEST
@@ -29,114 +22,66 @@ async function tradingRequest(callName, xml) {
 }
 
 /* ===============================
-   HELPERS
+   SANITIZERS (CRITICAL)
 ================================ */
-function safePrice(value) {
-  let p = Number(value);
-  if (!Number.isFinite(p) || p < 0.99) return null;
-  return p.toFixed(2); // always safe for XML
+function safePrice(p) {
+  const n = Number(p);
+  if (!Number.isFinite(n) || n < 0.99) return "0.99";
+  return n.toFixed(2);
 }
 
-function safeQty(value) {
-  const q = Number(value);
-  return Number.isFinite(q) ? Math.max(0, Math.floor(q)) : 0;
+function safeQty(q) {
+  const n = parseInt(q, 10);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return n;
 }
 
 /* ===============================
-   LISTING INSPECTOR (CACHED)
-================================ */
-const listingCache = new Map();
-
-async function inspectListing(itemId, token) {
-  if (listingCache.has(itemId)) return listingCache.get(itemId);
-
-  const xml = `<?xml version="1.0" encoding="utf-8"?>
-<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
-  <ItemID>${itemId}</ItemID>
-</GetItemRequest>`;
-
-  const res = await tradingRequest("GetItem", xml);
-
-  const isVariation = res.includes("<Variations>");
-  const managedBySKU = res.includes("<InventoryTrackingMethod>SKU</InventoryTrackingMethod>");
-
-  const info = { isVariation, managedBySKU };
-  listingCache.set(itemId, info);
-  return info;
-}
-
-/* ===============================
-   CORE ENGINE — FINAL STABLE
+   CORE SYNC
 ================================ */
 async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerId }) {
-  const token = process.env.EBAY_TRADING_TOKEN;
 
   const safeP = safePrice(price);
   const safeQ = safeQty(quantity);
 
-  const { isVariation, managedBySKU } = await inspectListing(parentItemId, token);
+  // 🔍 Diagnostic log you requested
+  console.log("🧪 SANITIZED:", {
+    sku: amazonSku,
+    item: parentItemId,
+    rawPrice: price,
+    safePrice: safeP,
+    rawQty: quantity,
+    safeQty: safeQ
+  });
 
-  /* ===== VARIATION LISTING ===== */
-  if (isVariation) {
-    const variationXml = `<?xml version="1.0" encoding="utf-8"?>
+  const token = process.env.EBAY_TRADING_TOKEN;
+
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
-  <Item>
-    <ItemID>${parentItemId}</ItemID>
-    <Variations>
-      <Variation>
-        <SKU>${amazonSku}</SKU>
-        ${safeP ? `<StartPrice>${safeP}</StartPrice>` : ``}
-        <Quantity>${safeQ}</Quantity>
-      </Variation>
-    </Variations>
-  </Item>
-</ReviseFixedPriceItemRequest>`;
-
-    const res = await tradingRequest("ReviseFixedPriceItem", variationXml);
-    if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
-
-    if (offerId) await updateOfferQuantity(offerId, safeQ);
-    return;
-  }
-
-  /* ===== NORMAL LISTING — PRICE ===== */
-  if (safeP) {
-    const priceXml = `<?xml version="1.0" encoding="utf-8"?>
-<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+  <RequesterCredentials>
+    <eBayAuthToken>${token}</eBayAuthToken>
+  </RequesterCredentials>
   <Item>
     <ItemID>${parentItemId}</ItemID>
     <StartPrice>${safeP}</StartPrice>
+    <Quantity>${safeQ}</Quantity>
   </Item>
 </ReviseFixedPriceItemRequest>`;
 
-    const res = await tradingRequest("ReviseFixedPriceItem", priceXml);
-    if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
+  const result = await tradingRequest("ReviseFixedPriceItem", xml);
+
+  if (!result.includes("<Ack>Success</Ack>")) {
+    console.error("❌ SYNC ERROR:", result);
+  } else {
+    console.log("🟢 SYNC RESULT: OK");
   }
 
-  /* ===== QUANTITY ===== */
-  const qtyXml = `<?xml version="1.0" encoding="utf-8"?>
-<ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
-  <InventoryStatus>
-    <ItemID>${parentItemId}</ItemID>
-    ${managedBySKU ? `<SKU>${amazonSku}</SKU>` : ``}
-    <Quantity>${safeQ}</Quantity>
-  </InventoryStatus>
-</ReviseInventoryStatusRequest>`;
-
-  const res = await tradingRequest("ReviseInventoryStatus", qtyXml);
-  if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
-
-  if (offerId) await updateOfferQuantity(offerId, safeQ);
+  return result;
 }
 
 /* ===============================
-   PUBLIC API — SERIALIZED
+   PUBLIC ENTRY
 ================================ */
 export async function reviseListing(data) {
-  variationLock = variationLock.then(() => _reviseListing(data));
-  return variationLock;
+  return _reviseListing(data);
 }
