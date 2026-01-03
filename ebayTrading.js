@@ -40,8 +40,12 @@ function xmlEscape(str) {
     .replace(/'/g, "&apos;");
 }
 
-function safeNumber(n) {
+function safePrice(n) {
   return Number(n || 0).toFixed(2);
+}
+
+function safeQty(n) {
+  return Math.max(0, Math.floor(Number(n) || 0));
 }
 
 /* ===============================
@@ -95,7 +99,8 @@ async function inspectListing(itemId, token) {
 ================================ */
 async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerId, variationName, variationValue }) {
   const token = process.env.EBAY_TRADING_TOKEN;
-  const safeQty = Math.max(0, Number(quantity) || 0);
+
+  const qty = safeQty(quantity);
 
   const { isVariation, managedBySKU } = await inspectListing(parentItemId, token);
 
@@ -122,8 +127,8 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
             <Value>${xmlEscape(variationValue)}</Value>
           </NameValueList>
         </VariationSpecifics>
-        <StartPrice>${safeNumber(price)}</StartPrice>
-        <Quantity>${safeNumber(safeQty)}</Quantity>
+        <StartPrice>${safePrice(price)}</StartPrice>
+        <Quantity>${qty}</Quantity>
       </Variation>
     </Variations>
   </Item>
@@ -132,7 +137,7 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
     const res = await safeTradingRequest("ReviseFixedPriceItem", variationXml);
     if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
 
-    if (offerId) await updateOfferQuantity(offerId, safeQty);
+    if (offerId) await updateOfferQuantity(offerId, qty);
     return;
   }
 
@@ -145,9 +150,9 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
   </RequesterCredentials>
   <Item>
     <ItemID>${xmlEscape(parentItemId)}</ItemID>
-    <StartPrice>${safeNumber(price)}</StartPrice>
+    <StartPrice>${safePrice(price)}</StartPrice>
     <ListingDetails>
-      <ConvertedStartPrice>${safeNumber(price)}</ConvertedStartPrice>
+      <ConvertedStartPrice>${safePrice(price)}</ConvertedStartPrice>
     </ListingDetails>
   </Item>
 </ReviseFixedPriceItemRequest>`;
@@ -163,14 +168,14 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
   <InventoryStatus>
     <ItemID>${xmlEscape(parentItemId)}</ItemID>
     ${managedBySKU ? `<SKU>${xmlEscape(amazonSku)}</SKU>` : ``}
-    <Quantity>${safeNumber(safeQty)}</Quantity>
+    <Quantity>${qty}</Quantity>
   </InventoryStatus>
 </ReviseInventoryStatusRequest>`;
 
   const res = await safeTradingRequest("ReviseInventoryStatus", qtyXml);
   if (res.includes("<Ack>Failure</Ack>")) throw new Error(res);
 
-  if (offerId) await updateOfferQuantity(offerId, safeQty);
+  if (offerId) await updateOfferQuantity(offerId, qty);
 }
 
 /* ===============================
