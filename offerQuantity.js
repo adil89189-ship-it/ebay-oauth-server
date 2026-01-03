@@ -1,39 +1,59 @@
 import fetch from "node-fetch";
-import { getInventoryToken } from "./inventoryAuth.js";
 
 /* ===============================
-   GLOBAL QUANTITY LOCK
-   Prevents concurrent stock races
+   EBAY INVENTORY API
 ================================ */
-let quantityLock = Promise.resolve();
-
-export async function updateOfferQuantity(offerId, quantity) {
-  quantityLock = quantityLock.then(async () => {
-    const accessToken = await getInventoryToken();
-
-    const res = await fetch(
-      `https://api.ebay.com/sell/inventory/v1/offer/${offerId}`,
-      {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-          "Content-Language": "en-GB"
-        },
-        body: JSON.stringify({ availableQuantity: quantity })
-      }
-    );
-
-    const text = await res.text();
-
-    if (!res.ok) {
-      console.error("❌ Offer quantity update failed:", text);
-      throw new Error("Offer quantity update failed");
-    }
-
-    // Allow eBay systems to settle before next update
-    await new Promise(r => setTimeout(r, 900));
+async function inventoryRequest(method, path, body) {
+  const res = await fetch(`https://api.ebay.com/sell/inventory/v1${path}`, {
+    method,
+    headers: {
+      "Authorization": `Bearer ${process.env.EBAY_INVENTORY_TOKEN}`,
+      "Content-Type": "application/json"
+    },
+    body: body ? JSON.stringify(body) : undefined
   });
 
-  return quantityLock;
+  return res.json();
+}
+
+/* ===============================
+   SANITIZER (matches trading.js)
+================================ */
+function safeQty(q) {
+  const n = parseInt(q, 10);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return n;
+}
+
+/* ===============================
+   PUBLIC ENTRY
+================================ */
+export async function updateOfferQuantity(offerId, quantity) {
+
+  const safeQ = safeQty(quantity);
+
+  // 🔍 Diagnostic log
+  console.log("🧪 INVENTORY SANITIZED:", {
+    offerId,
+    rawQty: quantity,
+    safeQty: safeQ
+  });
+
+  const body = {
+    availableQuantity: safeQ
+  };
+
+  const result = await inventoryRequest(
+    "POST",
+    `/offer/${offerId}/publish`,
+    body
+  );
+
+  if (!result || result.errors) {
+    console.error("❌ INVENTORY SYNC ERROR:", result);
+  } else {
+    console.log("🟢 INVENTORY SYNC OK");
+  }
+
+  return result;
 }
