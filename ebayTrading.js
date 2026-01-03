@@ -102,6 +102,12 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
 
   const qty = safeQty(quantity);
 
+  // 🛡️ MINIMUM PRICE SAFETY GUARD (does NOT affect OOS)
+  if (Number(price) < 0.99) {
+    console.warn("⛔ Price below eBay minimum, skipped:", parentItemId, price);
+    return;
+  }
+
   const { isVariation, managedBySKU } = await inspectListing(parentItemId, token);
 
   const hasVariationData =
