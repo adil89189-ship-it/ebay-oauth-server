@@ -3,12 +3,12 @@ import { updateOfferQuantity } from "./offerQuantity.js";
 const fetch = globalThis.fetch;
 
 /* ===============================
-   GLOBAL LOCK — prevents races
+   GLOBAL SERIALIZATION LOCK
 ================================ */
 let variationLock = Promise.resolve();
 
 /* ===============================
-   HARD EBAY THROTTLE — FIX 10007
+   EBAY HARD THROTTLE HANDLER
 ================================ */
 let lastCallTime = 0;
 
@@ -29,6 +29,22 @@ async function safeTradingRequest(callName, xml) {
 }
 
 /* ===============================
+   XML SAFETY
+================================ */
+function xmlEscape(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function safeNumber(n) {
+  return Number(n || 0).toFixed(2);
+}
+
+/* ===============================
    EBAY LOW LEVEL REQUEST
 ================================ */
 async function tradingRequest(callName, xml) {
@@ -45,6 +61,7 @@ async function tradingRequest(callName, xml) {
     },
     body: xml
   });
+
   return res.text();
 }
 
@@ -59,7 +76,7 @@ async function inspectListing(itemId, token) {
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
-  <ItemID>${itemId}</ItemID>
+  <ItemID>${xmlEscape(itemId)}</ItemID>
 </GetItemRequest>`;
 
   const res = await safeTradingRequest("GetItem", xml);
@@ -74,12 +91,11 @@ async function inspectListing(itemId, token) {
 }
 
 /* ===============================
-   CORE ENGINE — STABLE
+   CORE SYNC ENGINE
 ================================ */
 async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerId, variationName, variationValue }) {
   const token = process.env.EBAY_TRADING_TOKEN;
-
-  const safeQty = Number.isFinite(Number(quantity)) ? Math.max(0, Number(quantity)) : 0;
+  const safeQty = Math.max(0, Number(quantity) || 0);
 
   const { isVariation, managedBySKU } = await inspectListing(parentItemId, token);
 
@@ -88,7 +104,7 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
     String(variationName).trim() !== "" &&
     String(variationValue).trim() !== "";
 
-  /* ===== VARIATION LISTING ===== */
+  /* ===== VARIATION UPDATE ===== */
   if (isVariation && hasVariationData) {
     const variationXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -96,18 +112,18 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
     <eBayAuthToken>${token}</eBayAuthToken>
   </RequesterCredentials>
   <Item>
-    <ItemID>${parentItemId}</ItemID>
+    <ItemID>${xmlEscape(parentItemId)}</ItemID>
     <Variations>
       <Variation>
-        <SKU>${amazonSku}</SKU>
+        <SKU>${xmlEscape(amazonSku)}</SKU>
         <VariationSpecifics>
           <NameValueList>
-            <Name>${variationName}</Name>
-            <Value>${variationValue}</Value>
+            <Name>${xmlEscape(variationName)}</Name>
+            <Value>${xmlEscape(variationValue)}</Value>
           </NameValueList>
         </VariationSpecifics>
-        ${price !== undefined && price !== null ? `<StartPrice>${price}</StartPrice>` : ``}
-        <Quantity>${safeQty}</Quantity>
+        <StartPrice>${safeNumber(price)}</StartPrice>
+        <Quantity>${safeNumber(safeQty)}</Quantity>
       </Variation>
     </Variations>
   </Item>
@@ -128,10 +144,10 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
     <eBayAuthToken>${token}</eBayAuthToken>
   </RequesterCredentials>
   <Item>
-    <ItemID>${parentItemId}</ItemID>
-    <StartPrice>${price}</StartPrice>
+    <ItemID>${xmlEscape(parentItemId)}</ItemID>
+    <StartPrice>${safeNumber(price)}</StartPrice>
     <ListingDetails>
-      <ConvertedStartPrice>${price}</ConvertedStartPrice>
+      <ConvertedStartPrice>${safeNumber(price)}</ConvertedStartPrice>
     </ListingDetails>
   </Item>
 </ReviseFixedPriceItemRequest>`;
@@ -145,9 +161,9 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
   <InventoryStatus>
-    <ItemID>${parentItemId}</ItemID>
-    ${managedBySKU ? `<SKU>${amazonSku}</SKU>` : ``}
-    <Quantity>${safeQty}</Quantity>
+    <ItemID>${xmlEscape(parentItemId)}</ItemID>
+    ${managedBySKU ? `<SKU>${xmlEscape(amazonSku)}</SKU>` : ``}
+    <Quantity>${safeNumber(safeQty)}</Quantity>
   </InventoryStatus>
 </ReviseInventoryStatusRequest>`;
 
@@ -158,7 +174,7 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
 }
 
 /* ===============================
-   PUBLIC API — SERIALIZED
+   PUBLIC ENTRY (SERIALIZED)
 ================================ */
 export async function reviseListing(data) {
   variationLock = variationLock.then(() => _reviseListing(data));
