@@ -70,11 +70,11 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
 
   const result = await tradingRequest("ReviseFixedPriceItem", xml);
 
-  if (!result.includes("<Ack>Success</Ack>")) {
-    console.error("❌ SYNC ERROR:", result);
-  } else {
-    console.log("🟢 SYNC RESULT: OK");
-  }
+  if (result.includes("<Ack>Failure</Ack>")) {
+  console.error("❌ SYNC ERROR:", result);
+} else {
+  console.log("🟢 SYNC RESULT: OK");
+}
 
   return result;
 }
