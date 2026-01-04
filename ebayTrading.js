@@ -1,7 +1,25 @@
 import fetch from "node-fetch";
 
+/* ===============================
+   GLOBAL COMMIT LOCK
+================================ */
 let commitLock = Promise.resolve();
 
+/* ===============================
+   XML SAFETY
+================================ */
+function xmlSafe(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+/* ===============================
+   EBAY LOW LEVEL REQUEST
+================================ */
 function tradingRequest(callName, xml) {
   return fetch("https://api.ebay.com/ws/api.dll", {
     method: "POST",
@@ -18,36 +36,54 @@ function tradingRequest(callName, xml) {
   }).then(r => r.text());
 }
 
+/* ===============================
+   MAIN REVISION ENGINE
+================================ */
 export async function reviseListing(data) {
   commitLock = commitLock.then(async () => {
-    const { parentItemId, price, quantity, variationName, variationValue } = data;
 
-    const reviseXML = `<?xml version="1.0" encoding="utf-8"?>
+    const parentItemId  = xmlSafe(data.parentItemId);
+    const price         = xmlSafe(data.price);
+    const quantity      = xmlSafe(data.quantity);
+    const variationName = xmlSafe(data.variationName);
+    const variationValue= xmlSafe(data.variationValue);
+    const sku           = xmlSafe(data.sku);
+
+    let body = "";
+
+    if (variationName && variationValue && sku) {
+      body = `
+      <Variations>
+        <Variation>
+          <SKU>${sku}</SKU>
+          <StartPrice>${price}</StartPrice>
+          <Quantity>${quantity}</Quantity>
+          <VariationSpecifics>
+            <NameValueList>
+              <Name>${variationName}</Name>
+              <Value>${variationValue}</Value>
+            </NameValueList>
+          </VariationSpecifics>
+        </Variation>
+      </Variations>`;
+    } else {
+      body = `
+      <StartPrice>${price}</StartPrice>
+      <Quantity>${quantity}</Quantity>`;
+    }
+
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
     <eBayAuthToken>${process.env.EBAY_TRADING_TOKEN}</eBayAuthToken>
   </RequesterCredentials>
   <Item>
     <ItemID>${parentItemId}</ItemID>
-    ${variationName ? `
-    <Variations>
-      <Variation>
-        <StartPrice>${price}</StartPrice>
-        <Quantity>${quantity}</Quantity>
-        <VariationSpecifics>
-          <NameValueList>
-            <Name>${variationName}</Name>
-            <Value>${variationValue}</Value>
-          </NameValueList>
-        </VariationSpecifics>
-      </Variation>
-    </Variations>` : `
-    <StartPrice>${price}</StartPrice>
-    <Quantity>${quantity}</Quantity>`}
+    ${body}
   </Item>
 </ReviseFixedPriceItemRequest>`;
 
-    const response = await tradingRequest("ReviseFixedPriceItem", reviseXML);
+    const response = await tradingRequest("ReviseFixedPriceItem", xml);
     console.log("📦 EBAY RESPONSE:", response);
   });
 
