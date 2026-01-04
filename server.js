@@ -35,21 +35,14 @@ app.post("/sync", async (req, res) => {
 
     // 🧬 Variation handling
     if (isVariation) {
-      if (!data.offerId) {
-        data.offerId = await resolveOfferIdForVariation(
-          data.parentItemId,
-          data.variationName,
-          data.variationValue
-        );
-      }
-
-      await reviseVariation(
-        data.parentItemId,
-        data.amazonSku,
-        data.quantity,
-        data.price
-      );
-    }
+  // Variations are Trading-API only. Never touch offers.
+  await reviseVariation(
+    data.parentItemId,
+    data.amazonSku,
+    data.quantity,
+    data.price
+  );
+}
 
     // 🧾 Offer quantity ONLY for simple listings
     if (data.offerId && !isVariation) {
