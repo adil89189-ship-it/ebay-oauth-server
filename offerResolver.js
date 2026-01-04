@@ -1,29 +1,58 @@
 import fetch from "node-fetch";
-import { getItem } from "./ebayTrading.js";
 
 export async function resolveOfferIdForVariation(parentItemId, variationName, variationValue) {
 
-  // 1. Get full item with variations
-  const item = await getItem(parentItemId);
+  // Step 1: Get item variations using Trading API
+  const token = process.env.EBAY_TRADING_TOKEN;
 
-  const variations = item?.Variations?.Variation;
-  if (!variations) throw new Error("No variations found on listing");
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${token}</eBayAuthToken>
+  </RequesterCredentials>
+  <ItemID>${parentItemId}</ItemID>
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetItemRequest>`;
 
-  // 2. Find matching variation
-  const match = variations.find(v => {
-    const specifics = v.VariationSpecifics?.NameValueList || [];
-    return specifics.some(
-      s => s.Name === variationName && s.Value.includes(variationValue)
-    );
+  const res = await fetch("https://api.ebay.com/ws/api.dll", {
+    method: "POST",
+    headers: {
+      "Content-Type": "text/xml",
+      "X-EBAY-API-CALL-NAME": "GetItem",
+      "X-EBAY-API-SITEID": "3",
+      "X-EBAY-API-COMPATIBILITY-LEVEL": "1445",
+      "X-EBAY-API-APP-NAME": process.env.EBAY_CLIENT_ID,
+      "X-EBAY-API-DEV-NAME": process.env.EBAY_CLIENT_ID,
+      "X-EBAY-API-CERT-NAME": process.env.EBAY_CLIENT_SECRET
+    },
+    body: xml
   });
 
-  if (!match) throw new Error("Matching variation not found");
+  const text = await res.text();
 
-  const ebayVariationSKU = match.SKU;
-  if (!ebayVariationSKU) throw new Error("Variation has no eBay SKU");
+  // Step 2: Extract correct variation SKU
+  const variationBlock = text.match(/<Variation>([\s\S]*?)<\/Variation>/g);
+  if (!variationBlock) throw new Error("No variations found");
 
-  // 3. Find offer for that eBay SKU
-  const res = await fetch(
+  let ebayVariationSKU = null;
+
+  for (const block of variationBlock) {
+    const name = block.match(new RegExp(`<Name>${variationName}</Name>`));
+    const value = block.match(new RegExp(`<Value>${variationValue}</Value>`));
+
+    if (name && value) {
+      const skuMatch = block.match(/<SKU>(.*?)<\/SKU>/);
+      if (skuMatch) {
+        ebayVariationSKU = skuMatch[1];
+        break;
+      }
+    }
+  }
+
+  if (!ebayVariationSKU) throw new Error("Matching variation not found");
+
+  // Step 3: Resolve offerId using Inventory API
+  const invRes = await fetch(
     `https://api.ebay.com/sell/inventory/v1/offer?sku=${encodeURIComponent(ebayVariationSKU)}`,
     {
       headers: {
@@ -34,7 +63,8 @@ export async function resolveOfferIdForVariation(parentItemId, variationName, va
     }
   );
 
-  const data = await res.json();
+  const data = await invRes.json();
+
   if (!data.offers || !data.offers.length) {
     throw new Error(`No offer found for variation SKU ${ebayVariationSKU}`);
   }
