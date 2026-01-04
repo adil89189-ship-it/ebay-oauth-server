@@ -1,9 +1,8 @@
 import express from "express";
 import cors from "cors";
-import { reviseListing, reviseVariation } from "./ebayTrading.js";
-import { updateOfferQuantity } from "./offerQuantity.js";
+import { reviseListing } from "./ebayTrading.js";
 import { forceInventoryQuantity, unlockAndSetQuantity } from "./inventoryRefresh.js";
-import { resolveOfferIdForVariation } from "./offerResolver.js";
+import { updateOfferQuantity } from "./offerQuantity.js";
 
 const app = express();
 app.use(cors());
@@ -16,37 +15,26 @@ app.post("/sync", async (req, res) => {
 
   try {
     const data = { ...req.body };
-
     const isVariation = data.variationName && data.variationValue;
 
-    // 🛡 Parent revise ONLY for simple listings
-    if (!isVariation) {
+    // 🧬 VARIATION LISTINGS — Trading API ONLY
+    if (isVariation) {
       await reviseListing(data);
     }
 
-    // 🛡 Inventory API ONLY for simple listings
-    if (!isVariation) {
+    // 📦 SIMPLE LISTINGS — full pipeline
+    else {
+      await reviseListing(data);
+
       try {
         await forceInventoryQuantity(data.amazonSku, data.quantity);
       } catch {
         await unlockAndSetQuantity(data.amazonSku, data.quantity);
       }
-    }
 
-    // 🧬 Variation handling
-    if (isVariation) {
-  // Variations are Trading-API only. Never touch offers.
-  await reviseVariation(
-    data.parentItemId,
-    data.amazonSku,
-    data.quantity,
-    data.price
-  );
-}
-
-    // 🧾 Offer quantity ONLY for simple listings
-    if (data.offerId && !isVariation) {
-      await updateOfferQuantity(data.offerId, data.quantity);
+      if (data.offerId) {
+        await updateOfferQuantity(data.offerId, data.quantity);
+      }
     }
 
     console.log("🟢 SYNC COMPLETE");
