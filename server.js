@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { reviseListing } from "./ebayTrading.js";
+import { reviseListing, reviseVariationQuantity } from "./ebayTrading.js";
 import { updateOfferQuantity } from "./offerQuantity.js";
 import { forceInventoryQuantity, unlockAndSetQuantity } from "./inventoryRefresh.js";
 import { resolveOfferIdForVariation } from "./offerResolver.js";
@@ -21,29 +21,45 @@ app.post("/sync", async (req, res) => {
       data.quantity = 0;
     }
 
+    // Always update parent first
     await reviseListing(data);
 
+    // Try Inventory route
     try {
       await forceInventoryQuantity(data.amazonSku, data.quantity);
     } catch {
       await unlockAndSetQuantity(data.amazonSku, data.quantity);
     }
 
-    if (!data.offerId && data.variationName && data.variationValue) {
-      data.offerId = await resolveOfferIdForVariation(
-        data.parentItemId,
-        data.variationName,
-        data.variationValue
-      );
+    // Resolve offer if possible
+    try {
+      if (!data.offerId && data.variationName && data.variationValue) {
+        data.offerId = await resolveOfferIdForVariation(
+          data.parentItemId,
+          data.variationName,
+          data.variationValue
+        );
 
-      console.log("🧩 Resolved offerId:", data.offerId);
+        console.log("🧩 Resolved offerId:", data.offerId);
+      }
+
+      if (data.offerId) {
+        await updateOfferQuantity(data.offerId, data.quantity);
+        console.log("📦 Offer quantity updated");
+      }
+
+    } catch {
+      // Legacy fallback for non-inventory listings
+      if (data.variationName && data.variationValue) {
+        await reviseVariationQuantity(
+          data.parentItemId,
+          data.amazonSku,
+          data.quantity
+        );
+      }
     }
 
-    if (data.offerId) {
-      await updateOfferQuantity(data.offerId, data.quantity);
-    }
-
-    console.log("🟢 SYNC RESULT: OK");
+    console.log("🟢 SYNC COMPLETE");
     res.json({ ok: true });
 
   } catch (err) {
