@@ -1,7 +1,7 @@
 import fetch from "node-fetch";
 
 export async function forceInventoryQuantity(sku, quantity) {
-  const url = `https://api.ebay.com/sell/inventory/v1/inventory_item/${sku}`;
+  const url = `https://api.ebay.com/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`;
 
   const body = {
     availability: {
@@ -20,8 +20,12 @@ export async function forceInventoryQuantity(sku, quantity) {
     body: JSON.stringify(body)
   });
 
+  const text = await res.text();
+
   if (!res.ok) {
-    const t = await res.text();
-    throw new Error("Inventory refresh failed: " + t);
+    console.error("❌ Inventory refresh failed:", text);
+    throw new Error("Inventory refresh failed");
   }
+
+  console.log("🧱 Inventory cache refreshed for", sku, "→", quantity);
 }
