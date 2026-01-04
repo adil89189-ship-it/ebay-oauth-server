@@ -1,3 +1,18 @@
+async function getItem(parentItemId) {
+  const token = process.env.EBAY_TRADING_TOKEN;
+
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${token}</eBayAuthToken>
+  </RequesterCredentials>
+  <ItemID>${parentItemId}</ItemID>
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetItemRequest>`;
+
+  return tradingRequest("GetItem", xml);
+}
+
 export async function reviseListing(data) {
   const { parentItemId, amazonSku, price, quantity } = data;
   const token = process.env.EBAY_TRADING_TOKEN;
