@@ -1,5 +1,8 @@
 import fetch from "node-fetch";
 
+/* ===============================
+   EBAY LOW LEVEL REQUEST
+================================ */
 async function tradingRequest(callName, xml) {
   const res = await fetch("https://api.ebay.com/ws/api.dll", {
     method: "POST",
@@ -18,6 +21,15 @@ async function tradingRequest(callName, xml) {
   return res.text();
 }
 
+/* ===============================
+   SAFETY SANITIZERS
+================================ */
+const safePrice = p => Math.max(0.99, Number(p || 0)).toFixed(2);
+const safeQty   = q => Math.max(0, parseInt(q || 0, 10));
+
+/* ===============================
+   GET FULL ITEM (for variations)
+================================ */
 async function getItem(parentItemId) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
@@ -33,32 +45,39 @@ async function getItem(parentItemId) {
   return tradingRequest("GetItem", xml);
 }
 
+/* ===============================
+   CORE SYNC ENGINE
+================================ */
 export async function reviseListing(data) {
-  const { parentItemId, amazonSku, price, quantity } = data;
+  const { parentItemId, amazonSku, price, quantity, variationName, variationValue } = data;
   const token = process.env.EBAY_TRADING_TOKEN;
 
-  const itemXML = await getItem(parentItemId);
+  const isVariation = variationName && variationValue;
 
-  const variations = itemXML.match(/<Variation>[\s\S]*?<\/Variation>/g);
-  if (!variations) throw new Error("No variations found");
+  // 🧬 VARIATION LISTINGS (SAFE & COMPLETE)
+  if (isVariation) {
+    const itemXML = await getItem(parentItemId);
 
-  const rebuilt = variations.map(v => {
-    const sku = v.match(/<SKU>(.*?)<\/SKU>/)?.[1];
+    const variations = itemXML.match(/<Variation>[\s\S]*?<\/Variation>/g);
+    if (!variations) throw new Error("No variations found");
 
-    let out = v;
+    const rebuilt = variations.map(v => {
+      const sku = v.match(/<SKU>(.*?)<\/SKU>/)?.[1];
 
-    if (sku === amazonSku) {
-      out = out
-        .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${safePrice(price)}</StartPrice>`)
-        .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${safeQty(quantity)}</Quantity>`);
-    }
+      if (sku === amazonSku) {
+        return v
+          .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${safePrice(price)}</StartPrice>`)
+          .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${safeQty(quantity)}</Quantity>`);
+      }
 
-    return out;
-  }).join("");
+      return v;
+    }).join("");
 
-  const xml = `<?xml version="1.0" encoding="utf-8"?>
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+  <RequesterCredentials>
+    <eBayAuthToken>${token}</eBayAuthToken>
+  </RequesterCredentials>
   <Item>
     <ItemID>${parentItemId}</ItemID>
     <Variations>
@@ -67,8 +86,28 @@ export async function reviseListing(data) {
   </Item>
 </ReviseFixedPriceItemRequest>`;
 
+    const result = await tradingRequest("ReviseFixedPriceItem", xml);
+    if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
+
+    console.log("🧬 All variations preserved, target updated:", amazonSku);
+    return;
+  }
+
+  // 📦 SIMPLE LISTINGS
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${token}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <ItemID>${parentItemId}</ItemID>
+    <StartPrice>${safePrice(price)}</StartPrice>
+    <Quantity>${safeQty(quantity)}</Quantity>
+  </Item>
+</ReviseFixedPriceItemRequest>`;
+
   const result = await tradingRequest("ReviseFixedPriceItem", xml);
   if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
 
-  console.log("🧬 All variations preserved, target updated:", amazonSku);
+  console.log("📦 Simple listing updated:", parentItemId);
 }
