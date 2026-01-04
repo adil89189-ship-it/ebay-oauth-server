@@ -22,7 +22,7 @@ async function tradingRequest(callName, xml) {
 }
 
 /* ===============================
-   SANITIZERS (CRITICAL)
+   SANITIZERS (UNCHANGED)
 ================================ */
 function safePrice(p) {
   const n = Number(p);
@@ -37,14 +37,34 @@ function safeQty(q) {
 }
 
 /* ===============================
-   CORE SYNC
+   FETCH LISTING
 ================================ */
-async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerId }) {
+async function getItem(itemId, token) {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+  <ItemID>${itemId}</ItemID>
+</GetItemRequest>`;
+
+  return tradingRequest("GetItem", xml);
+}
+
+/* ===============================
+   CORE SYNC (FIXED)
+================================ */
+async function _reviseListing({
+  parentItemId,
+  price,
+  quantity,
+  amazonSku,
+  variationName,
+  variationValue
+}) {
 
   const safeP = safePrice(price);
   const safeQ = safeQty(quantity);
+  const token = process.env.EBAY_TRADING_TOKEN;
 
-  // 🔍 Diagnostic log you requested
   console.log("🧪 SANITIZED:", {
     sku: amazonSku,
     item: parentItemId,
@@ -54,27 +74,45 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
     safeQty: safeQ
   });
 
-  const token = process.env.EBAY_TRADING_TOKEN;
+  const raw = await getItem(parentItemId, token);
+
+  const variations = [...raw.matchAll(/<Variation>[\s\S]*?<\/Variation>/g)].map(v => v[0]);
+
+  const updated = variations.map(v => {
+    if (!v.includes(`<SKU>${amazonSku}</SKU>`)) return v;
+
+    return `
+<Variation>
+  <SKU>${amazonSku}</SKU>
+  <VariationSpecifics>
+    <NameValueList>
+      <Name>${variationName}</Name>
+      <Value>${variationValue}</Value>
+    </NameValueList>
+  </VariationSpecifics>
+  <StartPrice>${safeP}</StartPrice>
+  <Quantity>${safeQ}</Quantity>
+</Variation>`;
+  });
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${token}</eBayAuthToken>
-  </RequesterCredentials>
+  <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
   <Item>
     <ItemID>${parentItemId}</ItemID>
-    <StartPrice>${safeP}</StartPrice>
-    <Quantity>${safeQ}</Quantity>
+    <Variations>
+      ${updated.join("")}
+    </Variations>
   </Item>
 </ReviseFixedPriceItemRequest>`;
 
   const result = await tradingRequest("ReviseFixedPriceItem", xml);
 
   if (result.includes("<Ack>Failure</Ack>")) {
-  console.error("❌ SYNC ERROR:", result);
-} else {
-  console.log("🟢 SYNC RESULT: OK");
-}
+    console.error("❌ SYNC ERROR:", result);
+  } else {
+    console.log("🟢 SYNC RESULT: OK");
+  }
 
   return result;
 }
