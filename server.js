@@ -52,10 +52,12 @@ app.post("/sync", async (req, res) => {
       // Legacy fallback for non-inventory listings
       if (data.variationName && data.variationValue) {
         await reviseVariation(
-          data.parentItemId,
-          data.amazonSku,
-          data.quantity
-        );
+  data.parentItemId,
+  data.amazonSku,
+  data.quantity,
+  data.price,
+  data.price
+);
       }
     }
 
