@@ -1,8 +1,7 @@
 import fetch from "node-fetch";
 
-/* ===============================
-   EBAY LOW LEVEL REQUEST
-================================ */
+let variationLock = Promise.resolve();
+
 async function tradingRequest(callName, xml) {
   const res = await fetch("https://api.ebay.com/ws/api.dll", {
     method: "POST",
@@ -17,13 +16,9 @@ async function tradingRequest(callName, xml) {
     },
     body: xml
   });
-
   return res.text();
 }
 
-/* ===============================
-   SANITIZERS (UNCHANGED)
-================================ */
 function safePrice(p) {
   const n = Number(p);
   if (!Number.isFinite(n) || n < 0.99) return "0.99";
@@ -36,47 +31,36 @@ function safeQty(q) {
   return n;
 }
 
-/* ===============================
-   FETCH LISTING
-================================ */
 async function getItem(itemId, token) {
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
   <ItemID>${itemId}</ItemID>
 </GetItemRequest>`;
-
   return tradingRequest("GetItem", xml);
 }
 
-/* ===============================
-   CORE SYNC (FIXED)
-================================ */
-async function _reviseListing({
-  parentItemId,
-  price,
-  quantity,
-  amazonSku,
-  variationName,
-  variationValue
-}) {
+async function _reviseListing({ parentItemId, price, quantity, amazonSku, variationName, variationValue }) {
 
   const safeP = safePrice(price);
-  const safeQ = safeQty(quantity);
+  const desiredQty = safeQty(quantity);
   const token = process.env.EBAY_TRADING_TOKEN;
-
-  console.log("🧪 SANITIZED:", {
-    sku: amazonSku,
-    item: parentItemId,
-    rawPrice: price,
-    safePrice: safeP,
-    rawQty: quantity,
-    safeQty: safeQ
-  });
 
   const raw = await getItem(parentItemId, token);
 
   const variations = [...raw.matchAll(/<Variation>[\s\S]*?<\/Variation>/g)].map(v => v[0]);
+
+  let currentQty = 0;
+
+  for (const v of variations) {
+    if (v.includes(`<SKU>${amazonSku}</SKU>`)) {
+      const m = v.match(/<Quantity>(\d+)<\/Quantity>/);
+      if (m) currentQty = parseInt(m[1], 10);
+      break;
+    }
+  }
+
+  const delta = desiredQty - currentQty;
 
   const updated = variations.map(v => {
     if (!v.includes(`<SKU>${amazonSku}</SKU>`)) return v;
@@ -91,7 +75,7 @@ async function _reviseListing({
     </NameValueList>
   </VariationSpecifics>
   <StartPrice>${safeP}</StartPrice>
-  <Quantity>${safeQ}</Quantity>
+  <Quantity>${delta}</Quantity>
 </Variation>`;
   });
 
@@ -100,9 +84,7 @@ async function _reviseListing({
   <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
   <Item>
     <ItemID>${parentItemId}</ItemID>
-    <Variations>
-      ${updated.join("")}
-    </Variations>
+    <Variations>${updated.join("")}</Variations>
   </Item>
 </ReviseFixedPriceItemRequest>`;
 
@@ -111,15 +93,13 @@ async function _reviseListing({
   if (result.includes("<Ack>Failure</Ack>")) {
     console.error("❌ SYNC ERROR:", result);
   } else {
-    console.log("🟢 SYNC RESULT: OK");
+    console.log("🟢 SYNC RESULT:", amazonSku, "Qty:", desiredQty);
   }
 
   return result;
 }
 
-/* ===============================
-   PUBLIC ENTRY
-================================ */
 export async function reviseListing(data) {
-  return _reviseListing(data);
+  variationLock = variationLock.then(() => _reviseListing(data));
+  return variationLock;
 }
