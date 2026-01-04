@@ -25,7 +25,7 @@ async function tradingRequest(callName, xml) {
    HELPERS
 ================================ */
 const safePrice = p => Math.max(0.99, Number(p || 0)).toFixed(2);
-const safeQty   = q => Math.max(0, parseInt(q || 0, 10));
+const safeQty   = q => Math.max(0, parseInt(q ?? 0, 10));
 
 function tag(xml, name) {
   const m = xml.match(new RegExp(`<${name}>(.*?)</${name}>`));
@@ -38,7 +38,9 @@ function tag(xml, name) {
 async function getItem(itemId) {
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials><eBayAuthToken>${process.env.EBAY_TRADING_TOKEN}</eBayAuthToken></RequesterCredentials>
+  <RequesterCredentials>
+    <eBayAuthToken>${process.env.EBAY_TRADING_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
   <ItemID>${itemId}</ItemID>
   <DetailLevel>ReturnAll</DetailLevel>
 </GetItemRequest>`;
@@ -50,7 +52,7 @@ async function getItem(itemId) {
    CORE ENGINE
 ================================ */
 export async function reviseListing(data) {
-  const { parentItemId, amazonSku, price, quantity, variationName } = data;
+  const { parentItemId, amazonSku, price, quantity } = data;
 
   const itemXML = await getItem(parentItemId);
   const variations = itemXML.match(/<Variation>[\s\S]*?<\/Variation>/g);
@@ -58,9 +60,11 @@ export async function reviseListing(data) {
 
   const rebuilt = variations.map(v => {
     const sku = tag(v, "SKU");
+    const oldPrice = safePrice(tag(v, "StartPrice"));
+    const oldQty   = safeQty(tag(v, "Quantity"));
 
-    const finalPrice = sku === amazonSku ? safePrice(price) : safePrice(tag(v, "StartPrice"));
-    const finalQty   = sku === amazonSku ? safeQty(quantity) : safeQty(tag(v, "Quantity"));
+    const finalPrice = sku === amazonSku ? safePrice(price) : oldPrice;
+    const finalQty   = sku === amazonSku ? safeQty(quantity) : oldQty;
 
     return `
 <Variation>
@@ -73,7 +77,9 @@ export async function reviseListing(data) {
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials><eBayAuthToken>${process.env.EBAY_TRADING_TOKEN}</eBayAuthToken></RequesterCredentials>
+  <RequesterCredentials>
+    <eBayAuthToken>${process.env.EBAY_TRADING_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
   <Item>
     <ItemID>${parentItemId}</ItemID>
     <Variations>
@@ -85,5 +91,5 @@ export async function reviseListing(data) {
   const result = await tradingRequest("ReviseFixedPriceItem", xml);
   if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
 
-  console.log("🧬 Independent pricing locked. Target updated:", amazonSku);
+  console.log("🧬 Independent pricing & quantity locked. Updated:", amazonSku);
 }
