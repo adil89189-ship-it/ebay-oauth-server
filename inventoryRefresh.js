@@ -4,14 +4,15 @@ async function apiPut(url, body) {
   const res = await fetch(url, {
     method: "PUT",
     headers: {
-  "Content-Type": "application/json",
-  "Content-Language": "en-GB",
-  "Authorization": `Bearer ${process.env.EBAY_INVENTORY_TOKEN}`
-}
+      "Content-Type": "application/json",
+      "Content-Language": "en-GB",
+      "Authorization": `Bearer ${process.env.EBAY_INVENTORY_TOKEN}`
+    },
     body: JSON.stringify(body)
   });
 
   const text = await res.text();
+
   if (!res.ok) {
     throw new Error(text);
   }
