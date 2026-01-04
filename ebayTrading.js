@@ -37,14 +37,12 @@ function safeQty(q) {
 }
 
 /* ===============================
-   CORE SYNC
+   CORE SYNC (PARENT)
 ================================ */
-async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerId }) {
-
+async function _reviseListing({ parentItemId, price, quantity, amazonSku }) {
   const safeP = safePrice(price);
   const safeQ = safeQty(quantity);
 
-  // 🔍 Diagnostic log you requested
   console.log("🧪 SANITIZED:", {
     sku: amazonSku,
     item: parentItemId,
@@ -71,12 +69,42 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku, offerI
   const result = await tradingRequest("ReviseFixedPriceItem", xml);
 
   if (result.includes("<Ack>Failure</Ack>")) {
-  console.error("❌ SYNC ERROR:", result);
-} else {
-  console.log("🟢 SYNC RESULT: OK");
+    throw new Error(result);
+  }
+
+  console.log("🟢 Parent listing updated");
 }
 
-  return result;
+/* ===============================
+   VARIATION QUANTITY SYNC (LEGACY)
+================================ */
+export async function reviseVariationQuantity(parentItemId, variationSKU, quantity) {
+  const safeQ = safeQty(quantity);
+  const token = process.env.EBAY_TRADING_TOKEN;
+
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${token}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <ItemID>${parentItemId}</ItemID>
+    <Variations>
+      <Variation>
+        <SKU>${variationSKU}</SKU>
+        <Quantity>${safeQ}</Quantity>
+      </Variation>
+    </Variations>
+  </Item>
+</ReviseFixedPriceItemRequest>`;
+
+  const result = await tradingRequest("ReviseFixedPriceItem", xml);
+
+  if (result.includes("<Ack>Failure</Ack>")) {
+    throw new Error(result);
+  }
+
+  console.log("🧬 Variation quantity updated via Trading API");
 }
 
 /* ===============================
