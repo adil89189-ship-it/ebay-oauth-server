@@ -76,10 +76,11 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku }) {
 }
 
 /* ===============================
-   VARIATION QUANTITY SYNC (LEGACY)
+   VARIATION PRICE + QUANTITY SYNC
 ================================ */
-export async function reviseVariationQuantity(parentItemId, variationSKU, quantity) {
+export async function reviseVariation(parentItemId, variationSKU, quantity, price) {
   const safeQ = safeQty(quantity);
+  const safeP = safePrice(price);
   const token = process.env.EBAY_TRADING_TOKEN;
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
@@ -92,6 +93,7 @@ export async function reviseVariationQuantity(parentItemId, variationSKU, quanti
     <Variations>
       <Variation>
         <SKU>${variationSKU}</SKU>
+        <StartPrice>${safeP}</StartPrice>
         <Quantity>${safeQ}</Quantity>
       </Variation>
     </Variations>
@@ -104,7 +106,7 @@ export async function reviseVariationQuantity(parentItemId, variationSKU, quanti
     throw new Error(result);
   }
 
-  console.log("🧬 Variation quantity updated via Trading API");
+  console.log("🧬 Variation price & quantity updated via Trading API");
 }
 
 /* ===============================
