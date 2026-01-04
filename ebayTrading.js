@@ -20,30 +20,36 @@ async function tradingRequest(callName, xml) {
   return res.text();
 }
 
-export async function reviseListing({ parentItemId, sku, price, quantity, variationName, variationValue }) {
-
+export async function reviseListing({
+  parentItemId,
+  sku,
+  price,
+  quantity,
+  variationName,
+  variationValue
+}) {
   const xml = `<?xml version="1.0" encoding="utf-8"?>
-  <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-    <RequesterCredentials>
-      <eBayAuthToken>${process.env.EBAY_TRADING_TOKEN}</eBayAuthToken>
-    </RequesterCredentials>
-    <Item>
-      <ItemID>${parentItemId}</ItemID>
-      <Variations>
-        <Variation>
-          <SKU>${sku}</SKU>
-          <StartPrice>${price}</StartPrice>
-          <Quantity>${quantity}</Quantity>
-          <VariationSpecifics>
-            <NameValueList>
-              <Name>${variationName}</Name>
-              <Value>${variationValue}</Value>
-            </NameValueList>
-          </VariationSpecifics>
-        </Variation>
-      </Variations>
-    </Item>
-  </ReviseFixedPriceItemRequest>`;
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+<RequesterCredentials>
+  <eBayAuthToken>${process.env.EBAY_TRADING_TOKEN}</eBayAuthToken>
+</RequesterCredentials>
+<Item>
+  <ItemID>${parentItemId}</ItemID>
+  <Variations>
+    <Variation>
+      <SKU>${sku}</SKU>
+      <StartPrice>${price}</StartPrice>
+      <Quantity>${quantity}</Quantity>
+      <VariationSpecifics>
+        <NameValueList>
+          <Name>${variationName}</Name>
+          <Value>${variationValue}</Value>
+        </NameValueList>
+      </VariationSpecifics>
+    </Variation>
+  </Variations>
+</Item>
+</ReviseFixedPriceItemRequest>`;
 
   const response = await tradingRequest("ReviseFixedPriceItem", xml);
 
