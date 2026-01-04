@@ -64,11 +64,10 @@ export async function reviseListing(data) {
     const rebuilt = variations.map(v => {
       const sku = v.match(/<SKU>(.*?)<\/SKU>/)?.[1];
 
-      if (sku === amazonSku) {
-        return v
-          .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${safePrice(price)}</StartPrice>`)
-          .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${safeQty(quantity)}</Quantity>`);
-      }
+     return v
+  .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${safePrice(sku === amazonSku ? price : v.match(/<StartPrice>(.*?)<\/StartPrice>/)[1])}</StartPrice>`)
+  .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${safeQty(sku === amazonSku ? quantity : v.match(/<Quantity>(.*?)<\/Quantity>/)[1])}</Quantity>`);
+
 
       return v;
     }).join("");
