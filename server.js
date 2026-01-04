@@ -1,7 +1,12 @@
 import express from "express";
 import cors from "cors";
 import { reviseListing } from "./ebayTrading.js";
-import { forceInventoryQuantity, unlockAndSetQuantity } from "./inventoryRefresh.js";
+try {
+  await forceInventoryQuantity(data.amazonSku, data.quantity);
+} catch {
+  await unlockAndSetQuantity(data.amazonSku, data.quantity);
+}
+
 import { updateOfferQuantity } from "./offerQuantity.js";
 
 const app = express();
