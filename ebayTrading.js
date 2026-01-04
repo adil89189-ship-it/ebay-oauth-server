@@ -27,6 +27,11 @@ async function tradingRequest(callName, xml) {
 const safePrice = p => Math.max(0.99, Number(p || 0)).toFixed(2);
 const safeQty   = q => Math.max(0, parseInt(q || 0, 10));
 
+function readTag(xml, tag) {
+  const m = xml.match(new RegExp(`<${tag}>(.*?)</${tag}>`));
+  return m ? m[1] : null;
+}
+
 /* ===============================
    GET FULL ITEM (for variations)
 ================================ */
@@ -54,7 +59,7 @@ export async function reviseListing(data) {
 
   const isVariation = variationName && variationValue;
 
-  // 🧬 VARIATION LISTINGS (SAFE & COMPLETE)
+  // 🧬 VARIATION LISTINGS
   if (isVariation) {
     const itemXML = await getItem(parentItemId);
 
@@ -62,14 +67,29 @@ export async function reviseListing(data) {
     if (!variations) throw new Error("No variations found");
 
     const rebuilt = variations.map(v => {
-      const sku = v.match(/<SKU>(.*?)<\/SKU>/)?.[1];
+      const sku = readTag(v, "SKU");
 
-     return v
-  .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${safePrice(sku === amazonSku ? price : v.match(/<StartPrice>(.*?)<\/StartPrice>/)[1])}</StartPrice>`)
-  .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${safeQty(sku === amazonSku ? quantity : v.match(/<Quantity>(.*?)<\/Quantity>/)[1])}</Quantity>`);
+      const newPrice = safePrice(
+        sku === amazonSku ? price : (readTag(v, "StartPrice") ?? price)
+      );
 
+      const newQty = safeQty(
+        sku === amazonSku ? quantity : (readTag(v, "Quantity") ?? quantity)
+      );
 
-      return v;
+      let out = v;
+
+      if (v.includes("<StartPrice>"))
+        out = out.replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${newPrice}</StartPrice>`);
+      else
+        out = out.replace("</Variation>", `<StartPrice>${newPrice}</StartPrice></Variation>`);
+
+      if (v.includes("<Quantity>"))
+        out = out.replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${newQty}</Quantity>`);
+      else
+        out = out.replace("</Variation>", `<Quantity>${newQty}</Quantity></Variation>`);
+
+      return out;
     }).join("");
 
     const xml = `<?xml version="1.0" encoding="utf-8"?>
