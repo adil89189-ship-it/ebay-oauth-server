@@ -29,13 +29,12 @@ app.post("/sync", async (req, res) => {
       await unlockAndSetQuantity(data.amazonSku, data.quantity);
     }
 
-    // 🧩 Resolve variation offerId if missing
     if (!data.offerId && data.variationName && data.variationValue) {
       data.offerId = await resolveOfferIdForVariation(
-  data.parentItemId,
-  data.variationName,
-  data.variationValue
-);
+        data.parentItemId,
+        data.variationName,
+        data.variationValue
+      );
 
       console.log("🧩 Resolved offerId:", data.offerId);
     }
