@@ -22,104 +22,85 @@ async function tradingRequest(callName, xml) {
 }
 
 /* ===============================
-   SANITIZERS (CRITICAL)
+   SANITIZERS
 ================================ */
-function safePrice(p) {
-  const n = Number(p);
-  if (!Number.isFinite(n) || n < 0.99) return "0.99";
-  return n.toFixed(2);
-}
+const safePrice = p => Math.max(0.99, Number(p || 0)).toFixed(2);
+const safeQty = q => Math.max(0, parseInt(q || 0, 10));
 
-function safeQty(q) {
-  const n = parseInt(q, 10);
-  if (!Number.isFinite(n) || n < 0) return 0;
-  return n;
+/* ===============================
+   GET FULL VARIATIONS
+================================ */
+async function getFullItem(parentItemId) {
+  const token = process.env.EBAY_TRADING_TOKEN;
+
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+  <ItemID>${parentItemId}</ItemID>
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetItemRequest>`;
+
+  const result = await tradingRequest("GetItem", xml);
+  return result;
 }
 
 /* ===============================
-   CORE SYNC (PARENT)
+   CORE PARENT SYNC
 ================================ */
-async function _reviseListing({ parentItemId, price, quantity, amazonSku }) {
-  const safeP = safePrice(price);
-  const safeQ = safeQty(quantity);
-
-  console.log("🧪 SANITIZED:", {
-    sku: amazonSku,
-    item: parentItemId,
-    rawPrice: price,
-    safePrice: safeP,
-    rawQty: quantity,
-    safeQty: safeQ
-  });
-
+export async function reviseListing({ parentItemId, price, quantity }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${token}</eBayAuthToken>
-  </RequesterCredentials>
+  <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
   <Item>
     <ItemID>${parentItemId}</ItemID>
-    <StartPrice>${safeP}</StartPrice>
-    <Quantity>${safeQ}</Quantity>
+    <StartPrice>${safePrice(price)}</StartPrice>
+    <Quantity>${safeQty(quantity)}</Quantity>
   </Item>
 </ReviseFixedPriceItemRequest>`;
 
   const result = await tradingRequest("ReviseFixedPriceItem", xml);
-
-  if (result.includes("<Ack>Failure</Ack>")) {
-    throw new Error(result);
-  }
-
-  console.log("🟢 Parent listing updated");
+  if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
 }
 
 /* ===============================
-   VARIATION PRICE + QUANTITY SYNC
+   SAFE VARIATION SYNC
 ================================ */
-export async function reviseVariation(parentItemId, variationSKU, quantity, price, parentPrice) {
-  const safeQ = safeQty(quantity);
+export async function reviseVariation(parentItemId, targetSKU, quantity, price) {
+  const itemXML = await getFullItem(parentItemId);
 
-  const p = Number(price);
-  const pp = Number(parentPrice);
+  const variations = itemXML.match(/<Variation>[\s\S]*?<\/Variation>/g);
+  if (!variations) throw new Error("No variations found");
 
-  let safeP = Number.isFinite(p) && p >= 0.99 ? p : 0.99;
-  if (Number.isFinite(pp) && safeP < pp) safeP = pp;
-
-  safeP = safeP.toFixed(2);
+  const rebuilt = variations.map(v => {
+    const sku = v.match(/<SKU>(.*?)<\/SKU>/)?.[1];
+    if (sku === targetSKU) {
+      return `
+<Variation>
+  <SKU>${sku}</SKU>
+  <StartPrice>${safePrice(price)}</StartPrice>
+  <Quantity>${safeQty(quantity)}</Quantity>
+</Variation>`;
+    }
+    return v;
+  }).join("");
 
   const token = process.env.EBAY_TRADING_TOKEN;
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${token}</eBayAuthToken>
-  </RequesterCredentials>
+  <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
   <Item>
     <ItemID>${parentItemId}</ItemID>
     <Variations>
-      <Variation>
-        <SKU>${variationSKU}</SKU>
-        <StartPrice>${safeP}</StartPrice>
-        <Quantity>${safeQ}</Quantity>
-      </Variation>
+      ${rebuilt}
     </Variations>
   </Item>
 </ReviseFixedPriceItemRequest>`;
 
   const result = await tradingRequest("ReviseFixedPriceItem", xml);
+  if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
 
-  if (result.includes("<Ack>Failure</Ack>")) {
-    throw new Error(result);
-  }
-
-  console.log("🧬 Variation price & quantity updated via Trading API:", safeP);
-}
-
-/* ===============================
-   PUBLIC ENTRY
-================================ */
-export async function reviseListing(data) {
-  return _reviseListing(data);
+  console.log("🧬 Variation safely updated:", targetSKU);
 }
