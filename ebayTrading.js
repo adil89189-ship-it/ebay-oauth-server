@@ -1,8 +1,5 @@
 import fetch from "node-fetch";
 
-/* ===============================
-   EBAY LOW LEVEL REQUEST
-================================ */
 async function tradingRequest(callName, xml) {
   const res = await fetch("https://api.ebay.com/ws/api.dll", {
     method: "POST",
@@ -21,32 +18,9 @@ async function tradingRequest(callName, xml) {
   return res.text();
 }
 
-/* ===============================
-   SANITIZERS
-================================ */
 const safePrice = p => Math.max(0.99, Number(p || 0)).toFixed(2);
 const safeQty = q => Math.max(0, parseInt(q || 0, 10));
 
-/* ===============================
-   GET FULL VARIATIONS
-================================ */
-async function getFullItem(parentItemId) {
-  const token = process.env.EBAY_TRADING_TOKEN;
-
-  const xml = `<?xml version="1.0" encoding="utf-8"?>
-<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
-  <ItemID>${parentItemId}</ItemID>
-  <DetailLevel>ReturnAll</DetailLevel>
-</GetItemRequest>`;
-
-  const result = await tradingRequest("GetItem", xml);
-  return result;
-}
-
-/* ===============================
-   CORE PARENT SYNC
-================================ */
 export async function reviseListing({ parentItemId, price, quantity }) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
@@ -64,28 +38,7 @@ export async function reviseListing({ parentItemId, price, quantity }) {
   if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
 }
 
-/* ===============================
-   SAFE VARIATION SYNC
-================================ */
-export async function reviseVariation(parentItemId, targetSKU, quantity, price) {
-  const itemXML = await getFullItem(parentItemId);
-
-  const variations = itemXML.match(/<Variation>[\s\S]*?<\/Variation>/g);
-  if (!variations) throw new Error("No variations found");
-
-  const rebuilt = variations.map(v => {
-    const sku = v.match(/<SKU>(.*?)<\/SKU>/)?.[1];
-    if (sku === targetSKU) {
-      return `
-<Variation>
-  <SKU>${sku}</SKU>
-  <StartPrice>${safePrice(price)}</StartPrice>
-  <Quantity>${safeQty(quantity)}</Quantity>
-</Variation>`;
-    }
-    return v;
-  }).join("");
-
+export async function reviseVariation(parentItemId, sku, quantity, price) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
@@ -94,13 +47,15 @@ export async function reviseVariation(parentItemId, targetSKU, quantity, price) 
   <Item>
     <ItemID>${parentItemId}</ItemID>
     <Variations>
-      ${rebuilt}
+      <Variation>
+        <SKU>${sku}</SKU>
+        <StartPrice>${safePrice(price)}</StartPrice>
+        <Quantity>${safeQty(quantity)}</Quantity>
+      </Variation>
     </Variations>
   </Item>
 </ReviseFixedPriceItemRequest>`;
 
   const result = await tradingRequest("ReviseFixedPriceItem", xml);
   if (result.includes("<Ack>Failure</Ack>")) throw new Error(result);
-
-  console.log("🧬 Variation safely updated:", targetSKU);
 }
