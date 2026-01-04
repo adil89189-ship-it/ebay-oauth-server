@@ -78,9 +78,17 @@ async function _reviseListing({ parentItemId, price, quantity, amazonSku }) {
 /* ===============================
    VARIATION PRICE + QUANTITY SYNC
 ================================ */
-export async function reviseVariation(parentItemId, variationSKU, quantity, price) {
+export async function reviseVariation(parentItemId, variationSKU, quantity, price, parentPrice) {
   const safeQ = safeQty(quantity);
-  const safeP = safePrice(price);
+
+  const p = Number(price);
+  const pp = Number(parentPrice);
+
+  let safeP = Number.isFinite(p) && p >= 0.99 ? p : 0.99;
+  if (Number.isFinite(pp) && safeP < pp) safeP = pp;
+
+  safeP = safeP.toFixed(2);
+
   const token = process.env.EBAY_TRADING_TOKEN;
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
@@ -106,7 +114,7 @@ export async function reviseVariation(parentItemId, variationSKU, quantity, pric
     throw new Error(result);
   }
 
-  console.log("🧬 Variation price & quantity updated via Trading API");
+  console.log("🧬 Variation price & quantity updated via Trading API:", safeP);
 }
 
 /* ===============================
