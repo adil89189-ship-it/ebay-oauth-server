@@ -2,6 +2,9 @@ import fetch from "node-fetch";
 
 const ENDPOINT = "https://api.ebay.com/ws/api.dll";
 
+/* ===============================
+   LOW LEVEL EBAY REQUEST
+================================ */
 async function tradingRequest(callName, xml) {
   const res = await fetch(ENDPOINT, {
     method: "POST",
@@ -16,10 +19,12 @@ async function tradingRequest(callName, xml) {
     },
     body: xml
   });
-
   return res.text();
 }
 
+/* ===============================
+   FETCH FULL VARIATION SET
+================================ */
 async function getItem(itemId) {
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -29,23 +34,26 @@ async function getItem(itemId) {
 <ItemID>${itemId}</ItemID>
 </GetItemRequest>`;
 
-  return await tradingRequest("GetItem", xml);
+  return tradingRequest("GetItem", xml);
 }
 
-export async function reviseListing(payload) {
-  const raw = await getItem(payload.parentItemId);
+/* ===============================
+   AUTHORITATIVE SYNC ENGINE
+================================ */
+export async function reviseListing({ parentItemId, sku, price, quantity }) {
 
-  const variations = [...raw.matchAll(/<Variation>[\s\S]*?<\/Variation>/g)].map(v => v[0]);
+  const raw = await getItem(parentItemId);
+
+  const variations = [...raw.matchAll(/<Variation>[\s\S]*?<\/Variation>/g)]
+    .map(v => v[0]);
 
   const updated = variations.map(v => {
-    if (!v.includes(`<SKU>${payload.sku}</SKU>`)) return v;
+    if (!v.includes(`<SKU>${sku}</SKU>`)) return v;
 
     return v
-      .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${payload.price}</StartPrice>`)
-      .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${payload.quantity}</Quantity>`);
+      .replace(/<StartPrice>.*?<\/StartPrice>/, `<StartPrice>${price}</StartPrice>`)
+      .replace(/<Quantity>.*?<\/Quantity>/, `<Quantity>${quantity}</Quantity>`);
   });
-
-  const body = updated.join("");
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -53,16 +61,16 @@ export async function reviseListing(payload) {
   <eBayAuthToken>${process.env.EBAY_TRADING_TOKEN}</eBayAuthToken>
 </RequesterCredentials>
 <Item>
-  <ItemID>${payload.parentItemId}</ItemID>
+  <ItemID>${parentItemId}</ItemID>
   <Variations>
-    ${body}
+    ${updated.join("")}
   </Variations>
 </Item>
 </ReviseFixedPriceItemRequest>`;
 
-  const response = await tradingRequest("ReviseFixedPriceItem", xml);
+  const res = await tradingRequest("ReviseFixedPriceItem", xml);
 
-  if (response.includes("<Ack>Failure</Ack>")) {
-    throw new Error(response);
+  if (res.includes("<Ack>Failure</Ack>")) {
+    throw new Error(res);
   }
 }
