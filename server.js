@@ -17,17 +17,15 @@ app.post("/sync", async (req, res) => {
   try {
     const data = { ...req.body };
 
-    // 🛑 FIX: REMOVE DESTRUCTIVE OOS RULE
-    // Old rule deleted:
-    // if (data.price === null || data.quantity === 0) {
-    //   data.quantity = 0;
-    // }
+    const isVariation = data.variationName && data.variationValue;
 
-    // Always update parent listing first
-    await reviseListing(data);
+    // 🛡 Parent revise ONLY for simple listings
+    if (!isVariation) {
+      await reviseListing(data);
+    }
 
-    // Try Inventory route for non-variation quantity
-    if (!data.variationName || !data.variationValue) {
+    // 🛡 Inventory API ONLY for simple listings
+    if (!isVariation) {
       try {
         await forceInventoryQuantity(data.amazonSku, data.quantity);
       } catch {
@@ -35,34 +33,27 @@ app.post("/sync", async (req, res) => {
       }
     }
 
-    // Resolve offer if possible (for inventory-managed listings)
-    try {
-      if (!data.offerId && data.variationName && data.variationValue) {
+    // 🧬 Variation handling
+    if (isVariation) {
+      if (!data.offerId) {
         data.offerId = await resolveOfferIdForVariation(
           data.parentItemId,
           data.variationName,
           data.variationValue
         );
-
-        console.log("🧩 Resolved offerId:", data.offerId);
       }
 
-      if (data.offerId) {
-        await updateOfferQuantity(data.offerId, data.quantity);
-        console.log("📦 Offer quantity updated");
-      }
+      await reviseVariation(
+        data.parentItemId,
+        data.amazonSku,
+        data.quantity,
+        data.price
+      );
+    }
 
-    } catch {
-      // Legacy fallback for non-inventory variation listings
-      if (data.variationName && data.variationValue) {
-        await reviseVariation(
-          data.parentItemId,
-          data.amazonSku,
-          data.quantity,
-          data.price,
-          data.price
-        );
-      }
+    // 🧾 Offer quantity ONLY for simple listings
+    if (data.offerId && !isVariation) {
+      await updateOfferQuantity(data.offerId, data.quantity);
     }
 
     console.log("🟢 SYNC COMPLETE");
