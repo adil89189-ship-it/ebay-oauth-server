@@ -1,8 +1,30 @@
 import fetch from "node-fetch";
+import { getItem } from "./ebayTrading.js";
 
-export async function resolveOfferIdForVariation(sku, variationName, variationValue) {
-  const listRes = await fetch(
-    `https://api.ebay.com/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`,
+export async function resolveOfferIdForVariation(parentItemId, variationName, variationValue) {
+
+  // 1. Get full item with variations
+  const item = await getItem(parentItemId);
+
+  const variations = item?.Variations?.Variation;
+  if (!variations) throw new Error("No variations found on listing");
+
+  // 2. Find matching variation
+  const match = variations.find(v => {
+    const specifics = v.VariationSpecifics?.NameValueList || [];
+    return specifics.some(
+      s => s.Name === variationName && s.Value.includes(variationValue)
+    );
+  });
+
+  if (!match) throw new Error("Matching variation not found");
+
+  const ebayVariationSKU = match.SKU;
+  if (!ebayVariationSKU) throw new Error("Variation has no eBay SKU");
+
+  // 3. Find offer for that eBay SKU
+  const res = await fetch(
+    `https://api.ebay.com/sell/inventory/v1/offer?sku=${encodeURIComponent(ebayVariationSKU)}`,
     {
       headers: {
         "Authorization": `Bearer ${process.env.EBAY_INVENTORY_TOKEN}`,
@@ -12,35 +34,10 @@ export async function resolveOfferIdForVariation(sku, variationName, variationVa
     }
   );
 
-  const listData = await listRes.json();
-
-  if (!listData.offers || !listData.offers.length) {
-    throw new Error(`No offers found for SKU ${sku}`);
+  const data = await res.json();
+  if (!data.offers || !data.offers.length) {
+    throw new Error(`No offer found for variation SKU ${ebayVariationSKU}`);
   }
 
-  for (const offer of listData.offers) {
-    const detailRes = await fetch(
-      `https://api.ebay.com/sell/inventory/v1/offer/${offer.offerId}`,
-      {
-        headers: {
-          "Authorization": `Bearer ${process.env.EBAY_INVENTORY_TOKEN}`,
-          "Content-Type": "application/json",
-          "Content-Language": "en-GB"
-        }
-      }
-    );
-
-    const detail = await detailRes.json();
-
-    const text = JSON.stringify(detail);
-
-    if (
-      text.includes(`${variationName}: ${variationValue}`) ||
-      text.includes(variationValue)
-    ) {
-      return offer.offerId;
-    }
-  }
-
-  throw new Error(`Matching offer not found for ${variationName}=${variationValue}`);
+  return data.offers[0].offerId;
 }
