@@ -6,9 +6,6 @@ try {
 } catch {
   await unlockAndSetQuantity(data.amazonSku, data.quantity);
 }
-
-import { updateOfferQuantity } from "./offerQuantity.js";
-
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -36,10 +33,7 @@ app.post("/sync", async (req, res) => {
       } catch {
         await unlockAndSetQuantity(data.amazonSku, data.quantity);
       }
-
-      if (data.offerId) {
-        await updateOfferQuantity(data.offerId, data.quantity);
-      }
+     
     }
 
     console.log("🟢 SYNC COMPLETE");
