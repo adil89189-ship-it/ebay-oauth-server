@@ -1,3 +1,23 @@
+import fetch from "node-fetch";
+
+async function tradingRequest(callName, xml) {
+  const res = await fetch("https://api.ebay.com/ws/api.dll", {
+    method: "POST",
+    headers: {
+      "Content-Type": "text/xml",
+      "X-EBAY-API-CALL-NAME": callName,
+      "X-EBAY-API-SITEID": "3",
+      "X-EBAY-API-COMPATIBILITY-LEVEL": "1445",
+      "X-EBAY-API-APP-NAME": process.env.EBAY_CLIENT_ID,
+      "X-EBAY-API-DEV-NAME": process.env.EBAY_CLIENT_ID,
+      "X-EBAY-API-CERT-NAME": process.env.EBAY_CLIENT_SECRET
+    },
+    body: xml
+  });
+
+  return res.text();
+}
+
 async function getItem(parentItemId) {
   const token = process.env.EBAY_TRADING_TOKEN;
 
