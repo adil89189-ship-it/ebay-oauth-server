@@ -17,21 +17,25 @@ app.post("/sync", async (req, res) => {
   try {
     const data = { ...req.body };
 
-    if (data.price === null || data.quantity === 0) {
-      data.quantity = 0;
-    }
+    // 🛑 FIX: REMOVE DESTRUCTIVE OOS RULE
+    // Old rule deleted:
+    // if (data.price === null || data.quantity === 0) {
+    //   data.quantity = 0;
+    // }
 
-    // Always update parent first
+    // Always update parent listing first
     await reviseListing(data);
 
-    // Try Inventory route
-    try {
-      await forceInventoryQuantity(data.amazonSku, data.quantity);
-    } catch {
-      await unlockAndSetQuantity(data.amazonSku, data.quantity);
+    // Try Inventory route for non-variation quantity
+    if (!data.variationName || !data.variationValue) {
+      try {
+        await forceInventoryQuantity(data.amazonSku, data.quantity);
+      } catch {
+        await unlockAndSetQuantity(data.amazonSku, data.quantity);
+      }
     }
 
-    // Resolve offer if possible
+    // Resolve offer if possible (for inventory-managed listings)
     try {
       if (!data.offerId && data.variationName && data.variationValue) {
         data.offerId = await resolveOfferIdForVariation(
@@ -49,15 +53,15 @@ app.post("/sync", async (req, res) => {
       }
 
     } catch {
-      // Legacy fallback for non-inventory listings
+      // Legacy fallback for non-inventory variation listings
       if (data.variationName && data.variationValue) {
         await reviseVariation(
-  data.parentItemId,
-  data.amazonSku,
-  data.quantity,
-  data.price,
-  data.price
-);
+          data.parentItemId,
+          data.amazonSku,
+          data.quantity,
+          data.price,
+          data.price
+        );
       }
     }
 
