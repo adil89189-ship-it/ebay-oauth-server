@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { reviseListing, reviseVariationQuantity } from "./ebayTrading.js";
+import { reviseListing, reviseVariation } from "./ebayTrading.js";
 import { updateOfferQuantity } from "./offerQuantity.js";
 import { forceInventoryQuantity, unlockAndSetQuantity } from "./inventoryRefresh.js";
 import { resolveOfferIdForVariation } from "./offerResolver.js";
@@ -51,7 +51,7 @@ app.post("/sync", async (req, res) => {
     } catch {
       // Legacy fallback for non-inventory listings
       if (data.variationName && data.variationValue) {
-        await reviseVariationQuantity(
+        await reviseVariation(
           data.parentItemId,
           data.amazonSku,
           data.quantity
