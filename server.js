@@ -2,7 +2,8 @@ import express from "express";
 import cors from "cors";
 import { reviseListing } from "./ebayTrading.js";
 import { updateOfferQuantity } from "./offerQuantity.js";
-import { forceInventoryQuantity } from "./inventoryRefresh.js";
+import { forceInventoryQuantity, unlockAndSetQuantity } from "./inventoryRefresh.js";
+import { resolveOfferIdForVariation } from "./offerResolver.js";
 
 const app = express();
 app.use(cors());
@@ -20,19 +21,31 @@ app.post("/sync", async (req, res) => {
       data.quantity = 0;
     }
 
-    // 1️⃣ Update listing via Trading API
     await reviseListing(data);
 
-    // 2️⃣ Break inventory cache lock
-    await forceInventoryQuantity(data.amazonSku, data.quantity);
+    try {
+      await forceInventoryQuantity(data.amazonSku, data.quantity);
+    } catch {
+      await unlockAndSetQuantity(data.amazonSku, data.quantity);
+    }
 
-    // 3️⃣ Update offer quantity (Inventory API)
+    // 🧩 Resolve variation offerId if missing
+    if (!data.offerId && data.variationName && data.variationValue) {
+      data.offerId = await resolveOfferIdForVariation(
+        data.amazonSku,
+        data.variationName,
+        data.variationValue
+      );
+
+      console.log("🧩 Resolved offerId:", data.offerId);
+    }
+
     if (data.offerId) {
       await updateOfferQuantity(data.offerId, data.quantity);
     }
 
     console.log("🟢 SYNC RESULT: OK");
-    res.json({ ok: true, success: true });
+    res.json({ ok: true });
 
   } catch (err) {
     console.error("❌ SYNC ERROR:", err.message);
