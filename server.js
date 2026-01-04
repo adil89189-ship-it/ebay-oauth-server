@@ -4,7 +4,6 @@ import { reviseListing } from "./ebayTrading.js";
 try {
   await forceInventoryQuantity(data.amazonSku, data.quantity);
 } catch {
-  await unlockAndSetQuantity(data.amazonSku, data.quantity);
 }
 const app = express();
 app.use(cors());
