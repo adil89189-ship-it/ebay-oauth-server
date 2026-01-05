@@ -49,28 +49,25 @@ export async function reviseListing(data) {
     const variationValue= xmlSafe(data.variationValue);
     const sku           = xmlSafe(data.sku);
 
-    let body = "";
-
-    if (variationName && variationValue && sku) {
-      body = `
-      <Variations>
-        <Variation>
-          <SKU>${sku}</SKU>
-          <StartPrice>${price}</StartPrice>
-          <Quantity>${quantity}</Quantity>
-          <VariationSpecifics>
-            <NameValueList>
-              <Name>${variationName}</Name>
-              <Value>${variationValue}</Value>
-            </NameValueList>
-          </VariationSpecifics>
-        </Variation>
-      </Variations>`;
-    } else {
-      body = `
-      <StartPrice>${price}</StartPrice>
-      <Quantity>${quantity}</Quantity>`;
+    // 🚫 HARD BLOCK: Never send item-level price/qty for variation listings
+    if (!variationName || !variationValue || !sku) {
+      throw new Error("Variation data missing. Refusing to send item-level price/quantity.");
     }
+
+    const body = `
+    <Variations>
+      <Variation>
+        <SKU>${sku}</SKU>
+        <StartPrice>${price}</StartPrice>
+        <Quantity>${quantity}</Quantity>
+        <VariationSpecifics>
+          <NameValueList>
+            <Name>${variationName}</Name>
+            <Value>${variationValue}</Value>
+          </NameValueList>
+        </VariationSpecifics>
+      </Variation>
+    </Variations>`;
 
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
