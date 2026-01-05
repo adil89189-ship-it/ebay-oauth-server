@@ -42,32 +42,38 @@ function tradingRequest(callName, xml) {
 export async function reviseListing(data) {
   commitLock = commitLock.then(async () => {
 
-    const parentItemId  = xmlSafe(data.parentItemId);
-    const price         = xmlSafe(data.price);
-    const quantity      = xmlSafe(data.quantity);
-    const variationName = xmlSafe(data.variationName);
-    const variationValue= xmlSafe(data.variationValue);
-    const sku           = xmlSafe(data.sku);
+    const parentItemId   = xmlSafe(data.parentItemId);
+    const price          = xmlSafe(data.price);
+    const quantity       = xmlSafe(data.quantity);
+    const variationName  = xmlSafe(data.variationName);
+    const variationValue = xmlSafe(data.variationValue);
+    const sku            = xmlSafe(data.sku);
 
-    // 🚫 HARD BLOCK: Never send item-level price/qty for variation listings
-   if (!sku) {
-  throw new Error("Variation SKU missing. Cannot update listing.");
-}
+    if (!sku) {
+      throw new Error("Variation SKU missing. Cannot update listing.");
+    }
+
+    let specificsXML = "";
+
+    if (variationName && variationValue) {
+      specificsXML = `
+      <VariationSpecifics>
+        <NameValueList>
+          <Name>${variationName}</Name>
+          <Value>${variationValue}</Value>
+        </NameValueList>
+      </VariationSpecifics>`;
+    }
 
     const body = `
-    <Variations>
-      <Variation>
-        <SKU>${sku}</SKU>
-        <StartPrice>${price}</StartPrice>
-        <Quantity>${quantity}</Quantity>
-        <VariationSpecifics>
-          <NameValueList>
-            <Name>${variationName}</Name>
-            <Value>${variationValue}</Value>
-          </NameValueList>
-        </VariationSpecifics>
-      </Variation>
-    </Variations>`;
+      <Variations>
+        <Variation>
+          <SKU>${sku}</SKU>
+          <StartPrice>${price}</StartPrice>
+          <Quantity>${quantity}</Quantity>
+          ${specificsXML}
+        </Variation>
+      </Variations>`;
 
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
