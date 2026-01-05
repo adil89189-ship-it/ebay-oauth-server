@@ -50,9 +50,9 @@ export async function reviseListing(data) {
     const sku           = xmlSafe(data.sku);
 
     // 🚫 HARD BLOCK: Never send item-level price/qty for variation listings
-    if (!variationName || !variationValue || !sku) {
-      throw new Error("Variation data missing. Refusing to send item-level price/quantity.");
-    }
+   if (!sku) {
+  throw new Error("Variation SKU missing. Cannot update listing.");
+}
 
     const body = `
     <Variations>
