@@ -49,31 +49,43 @@ export async function reviseListing(data) {
     const variationValue = xmlSafe(data.variationValue);
     const sku            = xmlSafe(data.sku);
 
-    if (!sku) {
-      throw new Error("Variation SKU missing. Cannot update listing.");
+    const isVariation = variationName && variationValue;
+
+    if (isVariation && !sku) {
+      throw new Error("Variation SKU missing. Cannot update variation listing.");
     }
 
-    let specificsXML = "";
+    let body = "";
 
-    if (variationName && variationValue) {
-      specificsXML = `
-      <VariationSpecifics>
-        <NameValueList>
-          <Name>${variationName}</Name>
-          <Value>${variationValue}</Value>
-        </NameValueList>
-      </VariationSpecifics>`;
+    // 🔹 SIMPLE LISTING
+    if (!isVariation) {
+      body = `
+        <StartPrice>${price}</StartPrice>
+        <Quantity>${quantity}</Quantity>
+      `;
     }
 
-    const body = `
-      <Variations>
-        <Variation>
-          <SKU>${sku}</SKU>
-          <StartPrice>${price}</StartPrice>
-          <Quantity>${quantity}</Quantity>
-          ${specificsXML}
-        </Variation>
-      </Variations>`;
+    // 🔸 VARIATION LISTING
+    if (isVariation) {
+      let specificsXML = `
+        <VariationSpecifics>
+          <NameValueList>
+            <Name>${variationName}</Name>
+            <Value>${variationValue}</Value>
+          </NameValueList>
+        </VariationSpecifics>`;
+
+      body = `
+        <Variations>
+          <Variation>
+            <SKU>${sku}</SKU>
+            <StartPrice>${price}</StartPrice>
+            <Quantity>${quantity}</Quantity>
+            ${specificsXML}
+          </Variation>
+        </Variations>
+      `;
+    }
 
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
