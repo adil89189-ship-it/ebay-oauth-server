@@ -43,11 +43,16 @@ export async function reviseListing(data) {
   commitLock = commitLock.then(async () => {
 
     const parentItemId   = xmlSafe(data.parentItemId);
-    const price          = xmlSafe(data.price);
-    const quantity       = xmlSafe(data.quantity);
     const variationName  = xmlSafe(data.variationName);
     const variationValue = xmlSafe(data.variationValue);
     const sku            = xmlSafe(data.sku);
+    let quantity         = Number(data.quantity ?? 0);
+
+    // 🔐 PRICE VALIDATION
+    let rawPrice = Number(data.price);
+    let validPrice = rawPrice > 0 && Number.isFinite(rawPrice)
+      ? Number(rawPrice.toFixed(2))
+      : null;
 
     const isVariation = variationName && variationValue;
 
@@ -60,14 +65,14 @@ export async function reviseListing(data) {
     // 🔹 SIMPLE LISTING
     if (!isVariation) {
       body = `
-        <StartPrice>${price}</StartPrice>
+        ${validPrice !== null ? `<StartPrice>${validPrice}</StartPrice>` : ``}
         <Quantity>${quantity}</Quantity>
       `;
     }
 
     // 🔸 VARIATION LISTING
     if (isVariation) {
-      let specificsXML = `
+      const specificsXML = `
         <VariationSpecifics>
           <NameValueList>
             <Name>${variationName}</Name>
@@ -79,7 +84,7 @@ export async function reviseListing(data) {
         <Variations>
           <Variation>
             <SKU>${sku}</SKU>
-            <StartPrice>${price}</StartPrice>
+            ${validPrice !== null ? `<StartPrice>${validPrice}</StartPrice>` : ``}
             <Quantity>${quantity}</Quantity>
             ${specificsXML}
           </Variation>
