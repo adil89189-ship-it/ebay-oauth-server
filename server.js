@@ -14,26 +14,32 @@ app.post("/sync", async (req, res) => {
   try {
     const p = req.body;
 
-    const makeOOS = p.amazonState === "OOS";
-    const finalPrice = Number((p.rawPrice * p.multiplier).toFixed(2));
-
-    await reviseListing({
-      parentItemId: p.parentItemId,
-      variationName: p.variationName,
-      variationValue: p.variationValue,
-      sku: p.sku,
-
-      quantity: makeOOS ? 0 : p.desiredQty,
-      price: makeOOS ? 0.99 : finalPrice,
-
-      // 🔑 allow revive from OOS
-      outOfStockControl: false
-    });
+    // 🧱 HARD OOS ENFORCEMENT (Fresh / Morrisons & any forced OOS case)
+    if (Number(p.quantity) === 0) {
+      await reviseListing({
+        parentItemId: p.parentItemId,
+        variationName: p.variationName,
+        variationValue: p.variationValue,
+        sku: p.sku,
+        quantity: 0,
+        price: 0.99   // eBay requires valid price even when OOS
+      });
+    } 
+    else {
+      await reviseListing({
+        parentItemId: p.parentItemId,
+        variationName: p.variationName,
+        variationValue: p.variationValue,
+        sku: p.sku,
+        quantity: p.quantity,
+        price: p.price
+      });
+    }
 
     console.log("🟢 SYNC RESULT: OK");
     res.json({ ok: true });
-  } 
-  catch (err) {
+
+  } catch (err) {
     console.error("❌ SYNC ERROR:", err);
     res.status(500).json({ ok: false, error: err.message });
   }
