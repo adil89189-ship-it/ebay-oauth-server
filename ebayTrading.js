@@ -48,11 +48,11 @@ export async function reviseListing(data) {
     const sku            = xmlSafe(data.sku);
     let quantity         = Number(data.quantity ?? 0);
 
-    // 🔐 PRICE VALIDATION
+    // 🔒 ENFORCE VALID PRICE FOR EBAY
     let rawPrice = Number(data.price);
     let validPrice = rawPrice > 0 && Number.isFinite(rawPrice)
       ? Number(rawPrice.toFixed(2))
-      : null;
+      : 0.99; // ← CRITICAL FIX: never allow missing StartPrice
 
     const isVariation = variationName && variationValue;
 
@@ -65,7 +65,7 @@ export async function reviseListing(data) {
     // 🔹 SIMPLE LISTING
     if (!isVariation) {
       body = `
-        ${validPrice !== null ? `<StartPrice>${validPrice}</StartPrice>` : ``}
+        <StartPrice>${validPrice}</StartPrice>
         <Quantity>${quantity}</Quantity>
       `;
     }
@@ -84,7 +84,7 @@ export async function reviseListing(data) {
         <Variations>
           <Variation>
             <SKU>${sku}</SKU>
-            ${validPrice !== null ? `<StartPrice>${validPrice}</StartPrice>` : ``}
+            <StartPrice>${validPrice}</StartPrice>
             <Quantity>${quantity}</Quantity>
             ${specificsXML}
           </Variation>
