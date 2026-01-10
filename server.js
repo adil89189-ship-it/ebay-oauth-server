@@ -14,29 +14,22 @@ app.post("/sync", async (req, res) => {
   try {
     const p = req.body;
 
-    // 🧠 BACKEND-DRIVEN STATE CONTROL
-    if (p.amazonState === "FRESH") {
-      await reviseListing({
-        parentItemId: p.parentItemId,
-        variationName: p.variationName,
-        variationValue: p.variationValue,
-        sku: p.sku,
-        quantity: 0,
-        price: 0.99
-      });
-    } 
-    else {
-      const finalPrice = Number((p.rawPrice * p.multiplier).toFixed(2));
+    const makeOOS = p.amazonState === "OOS";
+    const finalPrice = Number((p.rawPrice * p.multiplier).toFixed(2));
 
-      await reviseListing({
-        parentItemId: p.parentItemId,
-        variationName: p.variationName,
-        variationValue: p.variationValue,
-        sku: p.sku,
-        quantity: p.desiredQty,
-        price: finalPrice
-      });
-    }
+    await reviseListing({
+      parentItemId: p.parentItemId,
+      variationName: p.variationName,
+      variationValue: p.variationValue,
+      sku: p.sku,
+
+      // 🔐 Only true OOS when extension says so
+      quantity: makeOOS ? 0 : p.desiredQty,
+      price: makeOOS ? 0.99 : finalPrice,
+
+      // 🔑 CRITICAL: allow revive from OOS
+      outOfStockControl: false
+    });
 
     console.log("🟢 SYNC RESULT: OK");
     res.json({ ok: true });
