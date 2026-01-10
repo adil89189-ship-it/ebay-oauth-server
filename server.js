@@ -23,11 +23,10 @@ app.post("/sync", async (req, res) => {
       variationValue: p.variationValue,
       sku: p.sku,
 
-      // 🔐 Only true OOS when extension says so
       quantity: makeOOS ? 0 : p.desiredQty,
       price: makeOOS ? 0.99 : finalPrice,
 
-      // 🔑 CRITICAL: allow revive from OOS
+      // 🔑 allow revive from OOS
       outOfStockControl: false
     });
 
