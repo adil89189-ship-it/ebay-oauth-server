@@ -41,10 +41,17 @@ export async function reviseListing(data){
 
     const isVariation = variationName && variationValue;
 
+    const clearDiscounts = `
+      <DiscountPriceInfo>
+        <OriginalRetailPrice currencyID="GBP">0</OriginalRetailPrice>
+      </DiscountPriceInfo>
+    `;
+
     let body = "";
 
     if (!isVariation) {
       body = `
+        ${clearDiscounts}
         <StartPrice>${price.toFixed(2)}</StartPrice>
         <Quantity>${quantity}</Quantity>
         <OutOfStockControl>false</OutOfStockControl>
@@ -53,6 +60,7 @@ export async function reviseListing(data){
 
     if (isVariation) {
       body = `
+        ${clearDiscounts}
         <Variations>
           <Variation>
             <SKU>${sku}</SKU>
