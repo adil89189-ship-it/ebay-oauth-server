@@ -36,8 +36,11 @@ export async function reviseListing(data){
     const sku = xmlSafe(data.sku);
 
     const quantity = Number(data.quantity ?? 0);
-    let price = Number(data.price);
-    if (!Number.isFinite(price) || price <= 0) price = 0.99;
+    const price = Number(data.price);
+if (!Number.isFinite(price) || price <= 0) {
+  throw new Error("Invalid price supplied for variation update");
+}
+
 
     const isVariation = variationName && variationValue;
 
