@@ -27,9 +27,6 @@ function tradingRequest(callName, xml){
   }).then(r=>r.text());
 }
 
-/* ===============================
-   GET EXISTING VARIATION PRICE
-================================ */
 export async function getCurrentVariationPrice(parentItemId, variationName, variationValue){
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
@@ -52,16 +49,11 @@ export async function getCurrentVariationPrice(parentItemId, variationName, vari
     )
   );
 
-  if (!match) {
-    throw new Error("Unable to locate existing variation price");
-  }
+  if (!match) return null;
 
   return Number(match[1]);
 }
 
-/* ===============================
-   REVISE LISTING
-================================ */
 export async function reviseListing(data){
 
   commitLock = commitLock.then(async()=>{
@@ -72,6 +64,7 @@ export async function reviseListing(data){
     const sku = xmlSafe(data.sku);
 
     const quantity = Number(data.quantity);
+    const price = Number(data.price);
     const isVariation = variationName && variationValue;
 
     let body = "";
@@ -79,14 +72,17 @@ export async function reviseListing(data){
     if (!isVariation) {
       body = `
         <Quantity>${quantity}</Quantity>
-        <OutOfStockControl>false</OutOfStockControl>
       `;
+      if (quantity > 0 && Number.isFinite(price)) {
+        body += `<StartPrice>${price}</StartPrice>`;
+      }
     } else {
       body = `
         <Variations>
           <Variation>
             <SKU>${sku}</SKU>
             <Quantity>${quantity}</Quantity>
+            ${quantity > 0 && Number.isFinite(price) ? `<StartPrice>${price}</StartPrice>` : ""}
             <VariationSpecifics>
               <NameValueList>
                 <Name>${variationName}</Name>
@@ -95,7 +91,6 @@ export async function reviseListing(data){
             </VariationSpecifics>
           </Variation>
         </Variations>
-        <OutOfStockControl>false</OutOfStockControl>
       `;
     }
 
