@@ -15,16 +15,19 @@ app.post("/sync", async (req, res) => {
     const p = req.body;
 
     // Always preserve last known price for variation OOS
-    let safePrice = Number(p.price);
+ let safePrice = Number(p.lastPrice);
 
-    if (!Number.isFinite(safePrice) || safePrice <= 0) {
-      safePrice = Number(p.lastPrice) || Number(p.sell) || 0.99;
-    }
+if (!Number.isFinite(safePrice) || safePrice <= 0) {
+  safePrice = Number(p.sell);
+}
 
-    if (!Number.isFinite(safePrice) || safePrice <= 0) {
-      safePrice = 0.99;
-    }
+if (!Number.isFinite(safePrice) || safePrice <= 0) {
+  safePrice = Number(p.price);
+}
 
+if (!Number.isFinite(safePrice) || safePrice <= 0) {
+  throw new Error("No valid price available for OOS update");
+}
     if (Number(p.quantity) === 0) {
       console.log("🧊 Applying SAFE OOS update");
       await reviseListing({
