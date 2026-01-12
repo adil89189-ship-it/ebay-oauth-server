@@ -27,6 +27,27 @@ function tradingRequest(callName, xml){
   }).then(r=>r.text());
 }
 
+export async function getCurrentVariationPrice(parentItemId, sku){
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${process.env.EBAY_TRADING_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
+  <ItemID>${parentItemId}</ItemID>
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetItemRequest>`;
+
+  const response = await tradingRequest("GetItem", xml);
+
+  const match = response.match(
+    new RegExp(`<SKU>${sku}</SKU>[\\s\\S]*?<StartPrice>([0-9.]+)</StartPrice>`)
+  );
+
+  if (!match) throw new Error("Unable to locate existing variation price");
+
+  return Number(match[1]);
+}
+
 export async function reviseListing(data){
   commitLock = commitLock.then(async()=>{
 
@@ -35,12 +56,12 @@ export async function reviseListing(data){
     const variationValue = xmlSafe(data.variationValue);
     const sku = xmlSafe(data.sku);
 
-    const quantity = Number(data.quantity ?? 0);
+    const quantity = Number(data.quantity);
     const price = Number(data.price);
-if (!Number.isFinite(price) || price <= 0) {
-  throw new Error("Invalid price supplied for variation update");
-}
 
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new Error("Invalid price supplied to reviseListing");
+    }
 
     const isVariation = variationName && variationValue;
 
@@ -59,9 +80,7 @@ if (!Number.isFinite(price) || price <= 0) {
         <Quantity>${quantity}</Quantity>
         <OutOfStockControl>false</OutOfStockControl>
       `;
-    }
-
-    if (isVariation) {
+    } else {
       body = `
         ${clearDiscounts}
         <Variations>
