@@ -27,6 +27,9 @@ function tradingRequest(callName, xml){
   }).then(r=>r.text());
 }
 
+/* ===============================
+   GET EXISTING VARIATION PRICE
+================================ */
 export async function getCurrentVariationPrice(parentItemId, variationName, variationValue){
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>
@@ -54,35 +57,48 @@ export async function getCurrentVariationPrice(parentItemId, variationName, vari
   return Number(match[1]);
 }
 
+/* ===============================
+   REVISE LISTING — FINAL SAFE OOS LOGIC
+================================ */
 export async function reviseListing(data){
 
   commitLock = commitLock.then(async()=>{
 
-    const parentItemId = xmlSafe(data.parentItemId);
+    const parentItemId   = xmlSafe(data.parentItemId);
     const variationName = xmlSafe(data.variationName);
-    const variationValue = xmlSafe(data.variationValue);
-    const sku = xmlSafe(data.sku);
+    const variationValue= xmlSafe(data.variationValue);
+    const sku           = xmlSafe(data.sku);
 
     const quantity = Number(data.quantity);
-    const price = Number(data.price);
+    const price    = Number(data.price);
     const isVariation = variationName && variationValue;
 
     let body = "";
 
     if (!isVariation) {
-      body = `
-        <Quantity>${quantity}</Quantity>
-      `;
+
+      body += `<Quantity>${quantity}</Quantity>`;
+
+      // ✅ Only send price when IN STOCK and VALID
       if (quantity > 0 && Number.isFinite(price)) {
         body += `<StartPrice>${price}</StartPrice>`;
       }
+
     } else {
-      body = `
+
+      body += `
         <Variations>
           <Variation>
             <SKU>${sku}</SKU>
             <Quantity>${quantity}</Quantity>
-            ${quantity > 0 && Number.isFinite(price) ? `<StartPrice>${price}</StartPrice>` : ""}
+      `;
+
+      // ✅ Only send price when IN STOCK and VALID
+      if (quantity > 0 && Number.isFinite(price)) {
+        body += `<StartPrice>${price}</StartPrice>`;
+      }
+
+      body += `
             <VariationSpecifics>
               <NameValueList>
                 <Name>${variationName}</Name>
