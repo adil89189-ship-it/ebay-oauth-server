@@ -39,9 +39,10 @@ export async function getCurrentVariationPrice(parentItemId, sku){
 
   const response = await tradingRequest("GetItem", xml);
 
-  const match = response.match(
-    new RegExp(`<SKU>${sku}</SKU>[\\s\\S]*?<StartPrice>([0-9.]+)</StartPrice>`)
-  );
+ const match = response.match(
+  new RegExp(`<SKU>${sku}</SKU>[\\s\\S]*?<StartPrice[^>]*>([0-9.]+)</StartPrice>`)
+);
+
 
   if (!match) throw new Error("Unable to locate existing variation price");
 
