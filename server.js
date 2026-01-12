@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { reviseListing } from "./ebayTrading.js";
+import { reviseListing, getCurrentVariationPrice } from "./ebayTrading.js";
 
 const app = express();
 app.use(cors());
@@ -14,40 +14,24 @@ app.post("/sync", async (req, res) => {
   try {
     const p = req.body;
 
-    // Always preserve last known price for variation OOS
- let safePrice = Number(p.lastPrice);
+    let safePrice = Number(p.lastPrice) || Number(p.sell) || Number(p.price);
 
-if (!Number.isFinite(safePrice) || safePrice <= 0) {
-  safePrice = Number(p.sell);
-}
-
-if (!Number.isFinite(safePrice) || safePrice <= 0) {
-  safePrice = Number(p.price);
-}
-
-if (!Number.isFinite(safePrice) || safePrice <= 0) {
-  throw new Error("No valid price available for OOS update");
-}
-    if (Number(p.quantity) === 0) {
-      console.log("🧊 Applying SAFE OOS update");
-      await reviseListing({
-        parentItemId: p.parentItemId,
-        variationName: p.variationName,
-        variationValue: p.variationValue,
-        sku: p.sku,
-        quantity: 0,
-        price: safePrice
-      });
-    } else {
-      await reviseListing({
-        parentItemId: p.parentItemId,
-        variationName: p.variationName,
-        variationValue: p.variationValue,
-        sku: p.sku,
-        quantity: p.quantity,
-        price: safePrice
-      });
+    if (!Number.isFinite(safePrice) || safePrice <= 0) {
+      safePrice = await getCurrentVariationPrice(p.parentItemId, p.ebayVariationSku);
     }
+
+    if (!Number.isFinite(safePrice) || safePrice <= 0) {
+      throw new Error("No valid price available for OOS update");
+    }
+
+    await reviseListing({
+      parentItemId: p.parentItemId,
+      variationName: p.variationName,
+      variationValue: p.variationValue,
+      sku: p.ebayVariationSku,
+      quantity: Number(p.quantity),
+      price: safePrice
+    });
 
     console.log("🟢 SYNC RESULT: OK");
     res.json({ ok: true });
