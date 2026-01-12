@@ -28,7 +28,7 @@ app.post("/sync", async (req, res) => {
     }
 
     await reviseListing({
-      parentItemId: p.parentItemId,
+      parentItemId: p.parentItemId || p.ebayParentItemId,
       variationName: p.variationName,
       variationValue: p.variationValue,
       sku: p.ebayVariationSku,
