@@ -17,7 +17,11 @@ app.post("/sync", async (req, res) => {
     let safePrice = Number(p.lastPrice) || Number(p.sell) || Number(p.price);
 
     if (!Number.isFinite(safePrice) || safePrice <= 0) {
-      safePrice = await getCurrentVariationPrice(p.parentItemId, p.ebayVariationSku);
+      safePrice = await getCurrentVariationPrice(
+        p.parentItemId,
+        p.variationName,
+        p.variationValue
+      );
     }
 
     if (!Number.isFinite(safePrice) || safePrice <= 0) {
