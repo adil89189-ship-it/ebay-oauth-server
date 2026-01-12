@@ -64,24 +64,26 @@ export async function reviseListing(data){
 
   commitLock = commitLock.then(async()=>{
 
-    const parentItemId =
-      xmlSafe(
-        data.parentItemId ||
-        data.ebayParentItemId ||
-        data.parentItemID ||
-        data.ebayParentID
-      );
+    const src = data.payload || data;
+
+    const parentItemId = xmlSafe(
+      src.parentItemId ||
+      src.ebayParentItemId ||
+      src.parentItemID ||
+      src.ebayParentID
+    );
 
     if (!parentItemId) {
+      console.error("❌ RAW DATA:", JSON.stringify(data, null, 2));
       throw new Error("Missing eBay ItemID — cannot revise listing");
     }
 
-    const variationName  = xmlSafe(data.variationName);
-    const variationValue = xmlSafe(data.variationValue);
-    const sku            = xmlSafe(data.sku);
+    const variationName  = xmlSafe(src.variationName);
+    const variationValue = xmlSafe(src.variationValue);
+    const sku            = xmlSafe(src.sku);
 
-    const quantity = Number(data.quantity);
-    const price    = Number(data.price);
+    const quantity = Number(src.quantity);
+    const price    = Number(src.price);
     const isVariation = variationName && variationValue;
 
     let body = "";
