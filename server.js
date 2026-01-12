@@ -14,25 +14,35 @@ app.post("/sync", async (req, res) => {
   try {
     const p = req.body;
 
-    // 🧱 HARD OOS ENFORCEMENT (Fresh / Morrisons & any forced OOS case)
+    // Always preserve last known price for variation OOS
+    let safePrice = Number(p.price);
+
+    if (!Number.isFinite(safePrice) || safePrice <= 0) {
+      safePrice = Number(p.lastPrice) || Number(p.sell) || 0.99;
+    }
+
+    if (!Number.isFinite(safePrice) || safePrice <= 0) {
+      safePrice = 0.99;
+    }
+
     if (Number(p.quantity) === 0) {
+      console.log("🧊 Applying SAFE OOS update");
       await reviseListing({
         parentItemId: p.parentItemId,
         variationName: p.variationName,
         variationValue: p.variationValue,
         sku: p.sku,
         quantity: 0,
-        price: 0.99   // eBay requires valid price even when OOS
+        price: safePrice
       });
-    } 
-    else {
+    } else {
       await reviseListing({
         parentItemId: p.parentItemId,
         variationName: p.variationName,
         variationValue: p.variationValue,
         sku: p.sku,
         quantity: p.quantity,
-        price: p.price
+        price: safePrice
       });
     }
 
