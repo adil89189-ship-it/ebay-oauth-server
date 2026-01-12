@@ -27,7 +27,11 @@ function tradingRequest(callName, xml){
   }).then(r=>r.text());
 }
 
-export async function getCurrentVariationPrice(parentItemId, sku){
+/* ===============================
+   GET EXISTING VARIATION PRICE
+================================ */
+export async function getCurrentVariationPrice(parentItemId, variationName, variationValue){
+
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
@@ -39,17 +43,27 @@ export async function getCurrentVariationPrice(parentItemId, sku){
 
   const response = await tradingRequest("GetItem", xml);
 
- const match = response.match(
-  new RegExp(`<SKU>${sku}</SKU>[\\s\\S]*?<StartPrice[^>]*>([0-9.]+)</StartPrice>`)
-);
+  const escName = variationName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escVal  = variationValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+  const match = response.match(
+    new RegExp(
+      `<Variation>[\\s\\S]*?<Name>${escName}</Name>[\\s\\S]*?<Value>${escVal}</Value>[\\s\\S]*?<StartPrice[^>]*>([0-9.]+)</StartPrice>`
+    )
+  );
 
-  if (!match) throw new Error("Unable to locate existing variation price");
+  if (!match) {
+    throw new Error("Unable to locate existing variation price");
+  }
 
   return Number(match[1]);
 }
 
+/* ===============================
+   REVISE LISTING
+================================ */
 export async function reviseListing(data){
+
   commitLock = commitLock.then(async()=>{
 
     const parentItemId = xmlSafe(data.parentItemId);
