@@ -58,16 +58,27 @@ export async function getCurrentVariationPrice(parentItemId, variationName, vari
 }
 
 /* ===============================
-   REVISE LISTING — FINAL SAFE OOS LOGIC
+   REVISE LISTING — PRODUCTION SAFE
 ================================ */
 export async function reviseListing(data){
 
   commitLock = commitLock.then(async()=>{
 
-    const parentItemId   = xmlSafe(data.parentItemId || data.ebayParentItemId);
-    const variationName = xmlSafe(data.variationName);
-    const variationValue= xmlSafe(data.variationValue);
-    const sku           = xmlSafe(data.sku);
+    const parentItemId =
+      xmlSafe(
+        data.parentItemId ||
+        data.ebayParentItemId ||
+        data.parentItemID ||
+        data.ebayParentID
+      );
+
+    if (!parentItemId) {
+      throw new Error("Missing eBay ItemID — cannot revise listing");
+    }
+
+    const variationName  = xmlSafe(data.variationName);
+    const variationValue = xmlSafe(data.variationValue);
+    const sku            = xmlSafe(data.sku);
 
     const quantity = Number(data.quantity);
     const price    = Number(data.price);
@@ -79,7 +90,6 @@ export async function reviseListing(data){
 
       body += `<Quantity>${quantity}</Quantity>`;
 
-      // ✅ Only send price when IN STOCK and VALID
       if (quantity > 0 && Number.isFinite(price)) {
         body += `<StartPrice>${price}</StartPrice>`;
       }
@@ -93,7 +103,6 @@ export async function reviseListing(data){
             <Quantity>${quantity}</Quantity>
       `;
 
-      // ✅ Only send price when IN STOCK and VALID
       if (quantity > 0 && Number.isFinite(price)) {
         body += `<StartPrice>${price}</StartPrice>`;
       }
