@@ -64,7 +64,7 @@ export async function reviseListing(data){
 
   commitLock = commitLock.then(async()=>{
 
-    const parentItemId   = xmlSafe(data.parentItemId);
+    const parentItemId   = xmlSafe(data.parentItemId || data.ebayParentItemId);
     const variationName = xmlSafe(data.variationName);
     const variationValue= xmlSafe(data.variationValue);
     const sku           = xmlSafe(data.sku);
