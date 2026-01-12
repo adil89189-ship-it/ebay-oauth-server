@@ -74,10 +74,6 @@ export async function reviseListing(data){
     const quantity = Number(data.quantity);
     const price = Number(data.price);
 
-    if (!Number.isFinite(price) || price <= 0) {
-      throw new Error("Invalid price supplied to reviseListing");
-    }
-
     const isVariation = variationName && variationValue;
 
     const clearDiscounts = `
@@ -89,20 +85,27 @@ export async function reviseListing(data){
     let body = "";
 
     if (!isVariation) {
-      body = `
-        ${clearDiscounts}
-        <StartPrice>${price.toFixed(2)}</StartPrice>
+  body = `
+    <Quantity>${quantity}</Quantity>
+    <OutOfStockControl>false</OutOfStockControl>
+  `;
+} else {
+  body = `
+    <Variations>
+      <Variation>
+        <SKU>${sku}</SKU>
         <Quantity>${quantity}</Quantity>
-        <OutOfStockControl>false</OutOfStockControl>
-      `;
-    } else {
-      body = `
-        ${clearDiscounts}
-        <Variations>
-          <Variation>
-            <SKU>${sku}</SKU>
-            <StartPrice>${price.toFixed(2)}</StartPrice>
-            <Quantity>${quantity}</Quantity>
+        <VariationSpecifics>
+          <NameValueList>
+            <Name>${variationName}</Name>
+            <Value>${variationValue}</Value>
+          </NameValueList>
+        </VariationSpecifics>
+      </Variation>
+    </Variations>
+    <OutOfStockControl>false</OutOfStockControl>
+  `;
+}
             <VariationSpecifics>
               <NameValueList>
                 <Name>${variationName}</Name>
