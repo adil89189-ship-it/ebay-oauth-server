@@ -72,40 +72,21 @@ export async function reviseListing(data){
     const sku = xmlSafe(data.sku);
 
     const quantity = Number(data.quantity);
-    const price = Number(data.price);
-
     const isVariation = variationName && variationValue;
-
-    const clearDiscounts = `
-      <DiscountPriceInfo>
-        <OriginalRetailPrice currencyID="GBP">0</OriginalRetailPrice>
-      </DiscountPriceInfo>
-    `;
 
     let body = "";
 
     if (!isVariation) {
-  body = `
-    <Quantity>${quantity}</Quantity>
-    <OutOfStockControl>false</OutOfStockControl>
-  `;
-} else {
-  body = `
-    <Variations>
-      <Variation>
-        <SKU>${sku}</SKU>
+      body = `
         <Quantity>${quantity}</Quantity>
-        <VariationSpecifics>
-          <NameValueList>
-            <Name>${variationName}</Name>
-            <Value>${variationValue}</Value>
-          </NameValueList>
-        </VariationSpecifics>
-      </Variation>
-    </Variations>
-    <OutOfStockControl>false</OutOfStockControl>
-  `;
-}
+        <OutOfStockControl>false</OutOfStockControl>
+      `;
+    } else {
+      body = `
+        <Variations>
+          <Variation>
+            <SKU>${sku}</SKU>
+            <Quantity>${quantity}</Quantity>
             <VariationSpecifics>
               <NameValueList>
                 <Name>${variationName}</Name>
