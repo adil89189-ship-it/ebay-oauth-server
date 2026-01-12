@@ -16,16 +16,15 @@ app.post("/sync", async (req, res) => {
 
     let safePrice = Number(p.lastPrice) || Number(p.sell) || Number(p.price);
 
-    if (!Number.isFinite(safePrice) || safePrice <= 0) {
-      safePrice = await getCurrentVariationPrice(
-        p.parentItemId,
-        p.variationName,
-        p.variationValue
-      );
-    }
-
-    if (!Number.isFinite(safePrice) || safePrice <= 0) {
-      throw new Error("No valid price available for OOS update");
+    // 🧠 Only require price when item is IN STOCK
+    if (Number(p.quantity) > 0) {
+      if (!Number.isFinite(safePrice) || safePrice <= 0) {
+        safePrice = await getCurrentVariationPrice(
+          p.parentItemId,
+          p.variationName,
+          p.variationValue
+        );
+      }
     }
 
     await reviseListing({
