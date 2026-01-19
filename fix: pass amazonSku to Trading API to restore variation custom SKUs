@@ -20,7 +20,7 @@ app.post("/sync", async (req, res) => {
     if (Number(p.quantity) > 0) {
       if (!Number.isFinite(safePrice) || safePrice <= 0) {
         safePrice = await getCurrentVariationPrice(
-          p.parentItemId,
+          p.parentItemId || p.ebayParentItemId,
           p.variationName,
           p.variationValue
         );
@@ -31,7 +31,10 @@ app.post("/sync", async (req, res) => {
       parentItemId: p.parentItemId || p.ebayParentItemId,
       variationName: p.variationName,
       variationValue: p.variationValue,
-      sku: p.ebayVariationSku,
+
+      // ✅ FIX: pass Amazon SKU for variation SKU mapping
+      amazonSku: p.amazonSku,
+
       quantity: Number(p.quantity),
       price: safePrice
     });
