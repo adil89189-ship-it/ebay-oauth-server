@@ -58,7 +58,7 @@ export async function getCurrentVariationPrice(parentItemId, variationName, vari
 }
 
 /* ===============================
-   REVISE LISTING — PRODUCTION SAFE
+   REVISE LISTING — SKU SAFE FIX
 ================================ */
 export async function reviseListing(data){
 
@@ -80,11 +80,18 @@ export async function reviseListing(data){
 
     const variationName  = xmlSafe(src.variationName);
     const variationValue = xmlSafe(src.variationValue);
-    const sku            = xmlSafe(src.sku);
+
+    // ✅ FIX: Always use Amazon SKU as eBay Variation SKU
+    const sku = xmlSafe(src.amazonSku || src.sku);
 
     const quantity = Number(src.quantity);
     const price    = Number(src.price);
     const isVariation = variationName && variationValue;
+
+    // 🔒 HARD SAFETY GUARD — NEVER WIPE SKU AGAIN
+    if (isVariation && !sku) {
+      throw new Error("BLOCKED: Variation SKU missing (amazonSku required)");
+    }
 
     let body = "";
 
