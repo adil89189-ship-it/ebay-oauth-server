@@ -6,7 +6,22 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get("/", (req, res) => res.send("🟢 eBay Trading Sync Engine LIVE (SAFE MODE)"));
+app.get("/", (req, res) => res.send("🟢 eBay Trading Sync Engine LIVE (PROTECTED)"));
+
+function safeNumber(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
+function isAnomalous(newPrice, oldPrice) {
+  if (!oldPrice) return false;
+  const drop = (oldPrice - newPrice) / oldPrice;
+  return drop > 0.2; // block >20% sudden drop
+}
 
 app.post("/sync", async (req, res) => {
   console.log("🧪 SYNC PAYLOAD:", JSON.stringify(req.body, null, 2));
@@ -14,61 +29,89 @@ app.post("/sync", async (req, res) => {
   try {
     const p = req.body;
 
-    // 🔑 Always prefer freshly calculated price
-    let freshPrice = Number(p.sell) || Number(p.price) || null;
-    let oldPrice   = Number(p.lastPrice) || null;
-    let safePrice  = null;
+    const buy = safeNumber(p.buy || p.lastBuy || p.price);
+    const multiplier = safeNumber(p.multiplier);
+    const oldSell = safeNumber(p.lastPrice);
 
-    // 🧠 If item is in stock, we must have a valid price
-    if (Number(p.quantity) > 0) {
+    const isVariation = p.variationName && p.variationValue;
 
-      // ❌ No fresh price? → fallback to eBay
-      if (!freshPrice || !Number.isFinite(freshPrice) || freshPrice <= 0) {
-        console.warn("⚠️ Fresh price missing, falling back to eBay price");
-        safePrice = await getCurrentVariationPrice(
-          p.parentItemId || p.ebayParentItemId,
-          p.variationName,
-          p.variationValue
-        );
-      } else {
-        safePrice = freshPrice;
+    // 🔒 HARD BLOCKS
+    if (!buy || !multiplier) {
+      return res.status(400).json({ ok: false, error: "INVALID_BUY_OR_MULTIPLIER" });
+    }
+
+    if (isVariation && !p.amazonSku) {
+      return res.status(400).json({ ok: false, error: "MISSING_VARIATION_SKU" });
+    }
+
+    let newSell = round2(buy * multiplier);
+
+    if (newSell <= buy) {
+      return res.status(400).json({
+        ok: false,
+        error: "SELL_BELOW_BUY_BLOCKED",
+        buy,
+        newSell
+      });
+    }
+
+    if (isAnomalous(newSell, oldSell)) {
+      return res.status(400).json({
+        ok: false,
+        error: "ANOMALY_BLOCKED",
+        oldSell,
+        newSell
+      });
+    }
+
+    // 🧠 If no quantity, do not touch price
+    if (Number(p.quantity) <= 0) {
+      await reviseListing({
+        parentItemId: p.parentItemId || p.ebayParentItemId,
+        variationName: p.variationName,
+        variationValue: p.variationValue,
+        amazonSku: p.amazonSku,
+        quantity: 0,
+        price: null
+      });
+
+      console.log("🟡 OOS SYNCED (NO PRICE CHANGE)");
+      return res.json({ ok: true, status: "OOS" });
+    }
+
+    // 🧯 If sell missing (should not happen now), fallback to eBay
+    if (!newSell || !Number.isFinite(newSell)) {
+      console.warn("⚠️ FALLBACK TO EBAY PRICE");
+
+      const ebayPrice = await getCurrentVariationPrice(
+        p.parentItemId || p.ebayParentItemId,
+        p.variationName,
+        p.variationValue
+      );
+
+      if (!ebayPrice) {
+        return res.status(400).json({ ok: false, error: "NO_PRICE_AVAILABLE" });
       }
 
-      // 🧨 Anomaly protection: block huge drops
-      if (oldPrice && safePrice && safePrice < oldPrice * 0.7) {
-        console.error("🚨 PRICE DROP BLOCKED", {
-          amazonSku: p.amazonSku,
-          oldPrice,
-          safePrice
-        });
-
-        return res.status(400).json({
-          ok: false,
-          error: "ANOMALY_BLOCKED",
-          oldPrice,
-          newPrice: safePrice
-        });
-      }
-
-    } else {
-      // Out of stock → allow quantity zero, no price change needed
-      safePrice = oldPrice || null;
+      newSell = ebayPrice;
     }
 
     await reviseListing({
       parentItemId: p.parentItemId || p.ebayParentItemId,
       variationName: p.variationName,
       variationValue: p.variationValue,
-
-      // Always use Amazon SKU for variation SKU
       amazonSku: p.amazonSku,
-
       quantity: Number(p.quantity),
-      price: safePrice
+      price: newSell
     });
 
-    console.log("🟢 SYNC RESULT: OK");
-    res.json({ ok: true });
+    console.log("🟢 SAFE SYNC OK", {
+      amazonSku: p.amazonSku,
+      buy,
+      sell: newSell
+    });
+
+    res.json({ ok: true, sell: newSell });
 
   } catch (err) {
     console.error("❌ SYNC ERROR:", err);
@@ -76,4 +119,4 @@ app.post("/sync", async (req, res) => {
   }
 });
 
-app.listen(3000, () => console.log("🚀 Server running on 3000 (SAFE MODE)"));
+app.listen(3000, () => console.log("🚀 Server running on 3000 (PROTECTED MODE)"));
