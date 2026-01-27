@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get("/", (req, res) => res.send("🟢 eBay Trading Sync Engine LIVE"));
+app.get("/", (req, res) => res.send("🟢 eBay Trading Sync Engine LIVE (SAFE MODE)"));
 
 app.post("/sync", async (req, res) => {
   console.log("🧪 SYNC PAYLOAD:", JSON.stringify(req.body, null, 2));
@@ -14,17 +14,45 @@ app.post("/sync", async (req, res) => {
   try {
     const p = req.body;
 
-    let safePrice = Number(p.lastPrice) || Number(p.sell) || Number(p.price);
+    // 🔑 Always prefer freshly calculated price
+    let freshPrice = Number(p.sell) || Number(p.price) || null;
+    let oldPrice   = Number(p.lastPrice) || null;
+    let safePrice  = null;
 
-    // 🧠 Only require price when item is IN STOCK
+    // 🧠 If item is in stock, we must have a valid price
     if (Number(p.quantity) > 0) {
-      if (!Number.isFinite(safePrice) || safePrice <= 0) {
+
+      // ❌ No fresh price? → fallback to eBay
+      if (!freshPrice || !Number.isFinite(freshPrice) || freshPrice <= 0) {
+        console.warn("⚠️ Fresh price missing, falling back to eBay price");
         safePrice = await getCurrentVariationPrice(
           p.parentItemId || p.ebayParentItemId,
           p.variationName,
           p.variationValue
         );
+      } else {
+        safePrice = freshPrice;
       }
+
+      // 🧨 Anomaly protection: block huge drops
+      if (oldPrice && safePrice && safePrice < oldPrice * 0.7) {
+        console.error("🚨 PRICE DROP BLOCKED", {
+          amazonSku: p.amazonSku,
+          oldPrice,
+          safePrice
+        });
+
+        return res.status(400).json({
+          ok: false,
+          error: "ANOMALY_BLOCKED",
+          oldPrice,
+          newPrice: safePrice
+        });
+      }
+
+    } else {
+      // Out of stock → allow quantity zero, no price change needed
+      safePrice = oldPrice || null;
     }
 
     await reviseListing({
@@ -32,7 +60,7 @@ app.post("/sync", async (req, res) => {
       variationName: p.variationName,
       variationValue: p.variationValue,
 
-      // ✅ FIX: pass Amazon SKU for variation SKU mapping
+      // Always use Amazon SKU for variation SKU
       amazonSku: p.amazonSku,
 
       quantity: Number(p.quantity),
@@ -48,4 +76,4 @@ app.post("/sync", async (req, res) => {
   }
 });
 
-app.listen(3000, () => console.log("🚀 Server running on 3000"));
+app.listen(3000, () => console.log("🚀 Server running on 3000 (SAFE MODE)"));
