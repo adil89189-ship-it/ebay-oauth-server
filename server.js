@@ -26,7 +26,8 @@ function isAnomalous(newPrice, oldPrice) {
 }
 
 app.post("/sync", async (req, res) => {
-  console.log("🧪 SYNC PAYLOAD:", JSON.stringify(req.body, null, 2));
+  console.log("🔥 SYNC HIT", new Date().toISOString());
+  console.log("BODY:", JSON.stringify(req.body, null, 2));
 
   try {
     const p = req.body;
@@ -35,7 +36,9 @@ app.post("/sync", async (req, res) => {
     const multiplier = safeNumber(p.multiplier);
     const oldSell = safeNumber(p.lastPrice);
 
-    const isVariation = p.variationName && p.variationValue;
+    const isVariation =
+      (p.variationName && p.variationValue) ||
+      p.ebayVariationSku;
 
     // 🧠 FORCE OOS WHEN EXTENSION FLAGS IT
     if (p.status === "OOS") {
