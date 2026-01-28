@@ -22,7 +22,7 @@ function round2(n) {
 function isAnomalous(newPrice, oldPrice) {
   if (!oldPrice) return false;
   const drop = (oldPrice - newPrice) / oldPrice;
-  return drop > 0.2; // block >20% sudden drop
+  return drop > 0.2;
 }
 
 app.post("/sync", async (req, res) => {
@@ -37,8 +37,23 @@ app.post("/sync", async (req, res) => {
 
     const isVariation = p.variationName && p.variationValue;
 
+    // 🧠 FORCE OOS WHEN EXTENSION FLAGS IT
+    if (p.status === "OOS") {
+      await reviseListing({
+        parentItemId: p.parentItemId || p.ebayParentItemId,
+        variationName: p.variationName,
+        variationValue: p.variationValue,
+        amazonSku: p.amazonSku,
+        quantity: 0,
+        price: null
+      });
+
+      console.log("🟡 OOS FORCED BY STATUS FLAG");
+      return res.json({ ok: true, status: "OOS" });
+    }
+
     // ============================
-    // 🧠 FIRST: HANDLE OOS
+    // 🧠 HANDLE OOS BY QUANTITY
     // ============================
     if (Number(p.quantity) <= 0) {
       await reviseListing({
@@ -55,7 +70,7 @@ app.post("/sync", async (req, res) => {
     }
 
     // ============================
-    // 🔒 HARD BLOCKS (IN-STOCK ONLY)
+    // 🔒 HARD BLOCKS
     // ============================
     if (!buy || !multiplier) {
       return res.status(400).json({
