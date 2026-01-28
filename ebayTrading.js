@@ -2,36 +2,56 @@ import fetch from "node-fetch";
 
 let commitLock = Promise.resolve();
 
-function xmlSafe(v){
+function xmlSafe(v) {
   return String(v ?? "")
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;")
-    .replace(/"/g,"&quot;")
-    .replace(/'/g,"&apos;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
-function tradingRequest(callName, xml){
-  return fetch("https://api.ebay.com/ws/api.dll",{
-    method:"POST",
-    headers:{
-      "Content-Type":"text/xml",
-      "X-EBAY-API-CALL-NAME":callName,
-      "X-EBAY-API-SITEID":"3",
-      "X-EBAY-API-COMPATIBILITY-LEVEL":"1445",
-      "X-EBAY-API-APP-NAME":process.env.EBAY_CLIENT_ID,
-      "X-EBAY-API-DEV-NAME":process.env.EBAY_CLIENT_ID,
-      "X-EBAY-API-CERT-NAME":process.env.EBAY_CLIENT_SECRET
+function tradingRequest(callName, xml) {
+  return fetch("https://api.ebay.com/ws/api.dll", {
+    method: "POST",
+    headers: {
+      "Content-Type": "text/xml",
+      "X-EBAY-API-CALL-NAME": callName,
+      "X-EBAY-API-SITEID": "3",
+      "X-EBAY-API-COMPATIBILITY-LEVEL": "1445",
+      "X-EBAY-API-APP-NAME": process.env.EBAY_CLIENT_ID,
+      "X-EBAY-API-DEV-NAME": process.env.EBAY_CLIENT_ID,
+      "X-EBAY-API-CERT-NAME": process.env.EBAY_CLIENT_SECRET
     },
-    body:xml
-  }).then(r=>r.text());
+    body: xml
+  }).then(r => r.text());
+}
+
+/* ===============================
+   GET ITEM INFO (TYPE DETECTION)
+================================ */
+async function getItemInfo(itemId) {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${process.env.EBAY_TRADING_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
+  <ItemID>${itemId}</ItemID>
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetItemRequest>`;
+
+  const response = await tradingRequest("GetItem", xml);
+
+  const isEnded = /<ListingStatus>Completed<\/ListingStatus>/.test(response);
+  const isVariation = /<Variations>/.test(response);
+
+  return { response, isEnded, isVariation };
 }
 
 /* ===============================
    GET EXISTING VARIATION PRICE
 ================================ */
-export async function getCurrentVariationPrice(parentItemId, variationName, variationValue){
-
+export async function getCurrentVariationPrice(parentItemId, variationName, variationValue) {
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
@@ -43,8 +63,8 @@ export async function getCurrentVariationPrice(parentItemId, variationName, vari
 
   const response = await tradingRequest("GetItem", xml);
 
-  const escName = (variationName || "").replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const escVal  = (variationValue || "").replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escName = (variationName || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escVal = (variationValue || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   const match = response.match(
     new RegExp(
@@ -57,12 +77,10 @@ export async function getCurrentVariationPrice(parentItemId, variationName, vari
 }
 
 /* ===============================
-   REVISE LISTING — FIXED VARIATION LOGIC
+   REVISE LISTING (SMART & SAFE)
 ================================ */
-export async function reviseListing(data){
-
-  commitLock = commitLock.then(async()=>{
-
+export async function reviseListing(data) {
+  commitLock = commitLock.then(async () => {
     const src = data.payload || data;
 
     const parentItemId = xmlSafe(
@@ -74,33 +92,30 @@ export async function reviseListing(data){
 
     if (!parentItemId) {
       console.error("❌ RAW DATA:", JSON.stringify(data, null, 2));
-      throw new Error("Missing eBay ItemID — cannot revise listing");
+      throw new Error("Missing eBay ItemID");
     }
 
-    const variationName  = xmlSafe(src.variationName || "");
+    const variationName = xmlSafe(src.variationName || "");
     const variationValue = xmlSafe(src.variationValue || "");
-
-    // Always prefer amazonSku as eBay variation SKU
     const sku = xmlSafe(src.amazonSku || src.sku || "");
 
     const quantity = Number(src.quantity);
-    const price    = Number(src.price);
+    const price = Number(src.price);
 
-    // 🔥 FIX: Detect variation using SKU OR name/value
-    const isVariation =
-      (variationName && variationValue) ||
-      sku;
+    // 🔍 Detect real listing type from eBay
+    const info = await getItemInfo(parentItemId);
 
-    // 🔒 SAFETY GUARD
-    if (isVariation && !sku) {
-      throw new Error("BLOCKED: Variation SKU missing (amazonSku required)");
+    if (info.isEnded) {
+      console.warn("⚠️ SKIPPED ENDED LISTING:", parentItemId);
+      return;
     }
+
+    const isVariation = info.isVariation;
 
     let body = "";
 
     if (!isVariation) {
-
-      // SIMPLE LISTING
+      // ✅ SINGLE SKU LISTING
       body += `<Quantity>${quantity}</Quantity>`;
 
       if (quantity > 0 && Number.isFinite(price)) {
@@ -108,8 +123,11 @@ export async function reviseListing(data){
       }
 
     } else {
+      // ✅ VARIATION LISTING
+      if (!sku) {
+        throw new Error("Variation listing requires SKU");
+      }
 
-      // VARIATION LISTING
       body += `
         <Variations>
           <Variation>
