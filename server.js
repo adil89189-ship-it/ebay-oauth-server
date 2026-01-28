@@ -52,9 +52,7 @@ app.post("/sync", async (req, res) => {
       return res.json({ ok: true, status: "OOS" });
     }
 
-    // ============================
     // 🧠 HANDLE OOS BY QUANTITY
-    // ============================
     if (Number(p.quantity) <= 0) {
       await reviseListing({
         parentItemId: p.parentItemId || p.ebayParentItemId,
@@ -69,9 +67,7 @@ app.post("/sync", async (req, res) => {
       return res.json({ ok: true, status: "OOS" });
     }
 
-    // ============================
     // 🔒 HARD BLOCKS
-    // ============================
     if (!buy || !multiplier) {
       return res.status(400).json({
         ok: false,
@@ -106,9 +102,7 @@ app.post("/sync", async (req, res) => {
       });
     }
 
-    // ============================
     // 🧯 FALLBACK TO EBAY PRICE
-    // ============================
     if (!newSell || !Number.isFinite(newSell)) {
       console.warn("⚠️ FALLBACK TO EBAY PRICE");
 
@@ -128,9 +122,7 @@ app.post("/sync", async (req, res) => {
       newSell = ebayPrice;
     }
 
-    // ============================
     // 🟢 APPLY PRICE + QTY
-    // ============================
     await reviseListing({
       parentItemId: p.parentItemId || p.ebayParentItemId,
       variationName: p.variationName,
