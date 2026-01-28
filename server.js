@@ -6,7 +6,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get("/", (req, res) => res.send("🟢 eBay Trading Sync Engine LIVE (PROTECTED)"));
+app.get("/", (req, res) =>
+  res.send("🟢 eBay Trading Sync Engine LIVE (PROTECTED)")
+);
 
 function safeNumber(v) {
   const n = Number(v);
@@ -35,13 +37,38 @@ app.post("/sync", async (req, res) => {
 
     const isVariation = p.variationName && p.variationValue;
 
-    // 🔒 HARD BLOCKS
+    // ============================
+    // 🧠 FIRST: HANDLE OOS
+    // ============================
+    if (Number(p.quantity) <= 0) {
+      await reviseListing({
+        parentItemId: p.parentItemId || p.ebayParentItemId,
+        variationName: p.variationName,
+        variationValue: p.variationValue,
+        amazonSku: p.amazonSku,
+        quantity: 0,
+        price: null
+      });
+
+      console.log("🟡 OOS SYNCED (NO PRICE CHANGE)");
+      return res.json({ ok: true, status: "OOS" });
+    }
+
+    // ============================
+    // 🔒 HARD BLOCKS (IN-STOCK ONLY)
+    // ============================
     if (!buy || !multiplier) {
-      return res.status(400).json({ ok: false, error: "INVALID_BUY_OR_MULTIPLIER" });
+      return res.status(400).json({
+        ok: false,
+        error: "INVALID_BUY_OR_MULTIPLIER"
+      });
     }
 
     if (isVariation && !p.amazonSku) {
-      return res.status(400).json({ ok: false, error: "MISSING_VARIATION_SKU" });
+      return res.status(400).json({
+        ok: false,
+        error: "MISSING_VARIATION_SKU"
+      });
     }
 
     let newSell = round2(buy * multiplier);
@@ -64,22 +91,9 @@ app.post("/sync", async (req, res) => {
       });
     }
 
-    // 🧠 If no quantity, do not touch price
-    if (Number(p.quantity) <= 0) {
-      await reviseListing({
-        parentItemId: p.parentItemId || p.ebayParentItemId,
-        variationName: p.variationName,
-        variationValue: p.variationValue,
-        amazonSku: p.amazonSku,
-        quantity: 0,
-        price: null
-      });
-
-      console.log("🟡 OOS SYNCED (NO PRICE CHANGE)");
-      return res.json({ ok: true, status: "OOS" });
-    }
-
-    // 🧯 If sell missing (should not happen now), fallback to eBay
+    // ============================
+    // 🧯 FALLBACK TO EBAY PRICE
+    // ============================
     if (!newSell || !Number.isFinite(newSell)) {
       console.warn("⚠️ FALLBACK TO EBAY PRICE");
 
@@ -90,12 +104,18 @@ app.post("/sync", async (req, res) => {
       );
 
       if (!ebayPrice) {
-        return res.status(400).json({ ok: false, error: "NO_PRICE_AVAILABLE" });
+        return res.status(400).json({
+          ok: false,
+          error: "NO_PRICE_AVAILABLE"
+        });
       }
 
       newSell = ebayPrice;
     }
 
+    // ============================
+    // 🟢 APPLY PRICE + QTY
+    // ============================
     await reviseListing({
       parentItemId: p.parentItemId || p.ebayParentItemId,
       variationName: p.variationName,
@@ -119,4 +139,6 @@ app.post("/sync", async (req, res) => {
   }
 });
 
-app.listen(3000, () => console.log("🚀 Server running on 3000 (PROTECTED MODE)"));
+app.listen(3000, () =>
+  console.log("🚀 Server running on 3000 (PROTECTED MODE)")
+);
