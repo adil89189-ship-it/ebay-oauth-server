@@ -6,9 +6,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get("/", (req, res) =>
-  res.send("🟢 eBay Trading Sync Engine LIVE (PROTECTED)")
-);
+app.get("/", (req, res) => {
+  res.send("🟢 eBay Trading Sync Engine LIVE (PROTECTED)");
+});
 
 function safeNumber(v) {
   const n = Number(v);
@@ -36,11 +36,7 @@ app.post("/sync", async (req, res) => {
     const multiplier = safeNumber(p.multiplier);
     const oldSell = safeNumber(p.lastPrice);
 
-    const isVariation =
-      (p.variationName && p.variationValue) ||
-      p.ebayVariationSku;
-
-    // 🧠 FORCE OOS WHEN EXTENSION FLAGS IT
+    // 🔴 HARD OOS PRIORITY (STATUS FLAG)
     if (p.status === "OOS") {
       await reviseListing({
         parentItemId: p.parentItemId || p.ebayParentItemId,
@@ -55,7 +51,7 @@ app.post("/sync", async (req, res) => {
       return res.json({ ok: true, status: "OOS" });
     }
 
-    // 🧠 HANDLE OOS BY QUANTITY
+    // 🔴 HARD OOS PRIORITY (QUANTITY)
     if (Number(p.quantity) <= 0) {
       await reviseListing({
         parentItemId: p.parentItemId || p.ebayParentItemId,
@@ -66,22 +62,15 @@ app.post("/sync", async (req, res) => {
         price: null
       });
 
-      console.log("🟡 OOS SYNCED (NO PRICE CHANGE)");
+      console.log("🟡 OOS FORCED BY QUANTITY");
       return res.json({ ok: true, status: "OOS" });
     }
 
-    // 🔒 HARD BLOCKS
+    // 🔒 VALIDATION
     if (!buy || !multiplier) {
       return res.status(400).json({
         ok: false,
         error: "INVALID_BUY_OR_MULTIPLIER"
-      });
-    }
-
-    if (isVariation && !p.amazonSku) {
-      return res.status(400).json({
-        ok: false,
-        error: "MISSING_VARIATION_SKU"
       });
     }
 
@@ -105,7 +94,7 @@ app.post("/sync", async (req, res) => {
       });
     }
 
-    // 🧯 FALLBACK TO EBAY PRICE
+    // 🧯 FALLBACK TO EBAY PRICE IF NEEDED
     if (!newSell || !Number.isFinite(newSell)) {
       console.warn("⚠️ FALLBACK TO EBAY PRICE");
 
@@ -149,6 +138,6 @@ app.post("/sync", async (req, res) => {
   }
 });
 
-app.listen(3000, () =>
-  console.log("🚀 Server running on 3000 (PROTECTED MODE)")
-);
+app.listen(3000, () => {
+  console.log("🚀 Server running on 3000 (PROTECTED MODE)");
+});
