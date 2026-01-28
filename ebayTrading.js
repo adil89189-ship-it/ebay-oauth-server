@@ -43,8 +43,8 @@ export async function getCurrentVariationPrice(parentItemId, variationName, vari
 
   const response = await tradingRequest("GetItem", xml);
 
-  const escName = variationName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const escVal  = variationValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escName = (variationName || "").replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escVal  = (variationValue || "").replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   const match = response.match(
     new RegExp(
@@ -53,12 +53,11 @@ export async function getCurrentVariationPrice(parentItemId, variationName, vari
   );
 
   if (!match) return null;
-
   return Number(match[1]);
 }
 
 /* ===============================
-   REVISE LISTING — SKU SAFE FIX
+   REVISE LISTING — FIXED VARIATION LOGIC
 ================================ */
 export async function reviseListing(data){
 
@@ -78,17 +77,21 @@ export async function reviseListing(data){
       throw new Error("Missing eBay ItemID — cannot revise listing");
     }
 
-    const variationName  = xmlSafe(src.variationName);
-    const variationValue = xmlSafe(src.variationValue);
+    const variationName  = xmlSafe(src.variationName || "");
+    const variationValue = xmlSafe(src.variationValue || "");
 
-    // ✅ FIX: Always use Amazon SKU as eBay Variation SKU
-    const sku = xmlSafe(src.amazonSku || src.sku);
+    // Always prefer amazonSku as eBay variation SKU
+    const sku = xmlSafe(src.amazonSku || src.sku || "");
 
     const quantity = Number(src.quantity);
     const price    = Number(src.price);
-    const isVariation = variationName && variationValue;
 
-    // 🔒 HARD SAFETY GUARD — NEVER WIPE SKU AGAIN
+    // 🔥 FIX: Detect variation using SKU OR name/value
+    const isVariation =
+      (variationName && variationValue) ||
+      sku;
+
+    // 🔒 SAFETY GUARD
     if (isVariation && !sku) {
       throw new Error("BLOCKED: Variation SKU missing (amazonSku required)");
     }
@@ -97,6 +100,7 @@ export async function reviseListing(data){
 
     if (!isVariation) {
 
+      // SIMPLE LISTING
       body += `<Quantity>${quantity}</Quantity>`;
 
       if (quantity > 0 && Number.isFinite(price)) {
@@ -105,6 +109,7 @@ export async function reviseListing(data){
 
     } else {
 
+      // VARIATION LISTING
       body += `
         <Variations>
           <Variation>
@@ -116,13 +121,18 @@ export async function reviseListing(data){
         body += `<StartPrice>${price}</StartPrice>`;
       }
 
-      body += `
+      if (variationName && variationValue) {
+        body += `
             <VariationSpecifics>
               <NameValueList>
                 <Name>${variationName}</Name>
                 <Value>${variationValue}</Value>
               </NameValueList>
             </VariationSpecifics>
+        `;
+      }
+
+      body += `
           </Variation>
         </Variations>
       `;
