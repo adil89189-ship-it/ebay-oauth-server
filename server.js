@@ -1,3 +1,5 @@
+// server.js — STRICT SEQUENTIAL SYNC (GLOBAL QUEUE)
+
 import express from "express";
 import cors from "cors";
 import { reviseListing } from "./ebayTrading.js";
@@ -6,9 +8,15 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get("/", (req, res) =>
-  res.send("🟢 eBay Trading Sync Engine LIVE (PROTECTED)")
-);
+/* =========================
+   GLOBAL SYNC QUEUE
+========================= */
+
+let syncQueue = Promise.resolve();
+
+/* =========================
+   HELPERS
+========================= */
 
 function safeNumber(v) {
   const n = Number(v);
@@ -25,62 +33,85 @@ function isAnomalous(newPrice, oldPrice) {
   return drop > 0.2;
 }
 
-app.post("/sync", async (req, res) => {
-  console.log("🔥 SYNC HIT", new Date().toISOString());
-  console.log("BODY:", JSON.stringify(req.body, null, 2));
+/* =========================
+   ROUTES
+========================= */
 
-  try {
-    const p = req.body;
+app.get("/", (req, res) =>
+  res.send("🟢 eBay Trading Sync Engine LIVE (SEQUENTIAL MODE)")
+);
 
-    const buy = safeNumber(p.buy || p.lastBuy || p.price);
-    const multiplier = safeNumber(p.multiplier);
-    const oldSell = safeNumber(p.lastPrice);
+/**
+ * 🔒 SEQUENTIAL SYNC ROUTE
+ * - Requests are queued
+ * - Never overlap
+ * - Order preserved
+ */
+app.post("/sync", (req, res) => {
+  syncQueue = syncQueue.then(async () => {
+    try {
+      console.log("🔁 SYNC START", new Date().toISOString());
 
-    // 🔴 FORCE OOS FIRST
-    if (p.status === "OOS" || Number(p.quantity) <= 0) {
+      const p = req.body;
+
+      const buy = safeNumber(p.buy || p.lastBuy || p.price);
+      const multiplier = safeNumber(p.multiplier);
+      const oldSell = safeNumber(p.lastPrice);
+
+      /* ---- FORCE OOS ---- */
+      if (p.status === "OOS" || Number(p.quantity) <= 0) {
+        await reviseListing({
+          parentItemId: p.parentItemId || p.ebayParentItemId,
+          variationName: p.variationName,
+          variationValue: p.variationValue,
+          amazonSku: p.amazonSku,
+          quantity: 0,
+          price: null
+        });
+
+        res.json({ ok: true, status: "OOS" });
+        return;
+      }
+
+      if (!buy || !multiplier) {
+        res.status(400).json({ ok: false, error: "INVALID_BUY_OR_MULTIPLIER" });
+        return;
+      }
+
+      const newSell = round2(buy * multiplier);
+
+      if (newSell <= buy) {
+        res.status(400).json({ ok: false, error: "SELL_BELOW_BUY_BLOCKED" });
+        return;
+      }
+
+      if (isAnomalous(newSell, oldSell)) {
+        res.status(400).json({ ok: false, error: "ANOMALY_BLOCKED" });
+        return;
+      }
+
       await reviseListing({
         parentItemId: p.parentItemId || p.ebayParentItemId,
         variationName: p.variationName,
         variationValue: p.variationValue,
         amazonSku: p.amazonSku,
-        quantity: 0,
-        price: null
+        quantity: Number(p.quantity),
+        price: newSell
       });
 
-      return res.json({ ok: true, status: "OOS" });
+      res.json({ ok: true, sell: newSell });
+
+    } catch (err) {
+      console.error("❌ SYNC ERROR:", err);
+      res.status(500).json({ ok: false, error: err.message });
     }
-
-    if (!buy || !multiplier) {
-      return res.status(400).json({ ok: false, error: "INVALID_BUY_OR_MULTIPLIER" });
-    }
-
-    let newSell = round2(buy * multiplier);
-
-    if (newSell <= buy) {
-      return res.status(400).json({ ok: false, error: "SELL_BELOW_BUY_BLOCKED" });
-    }
-
-    if (isAnomalous(newSell, oldSell)) {
-      return res.status(400).json({ ok: false, error: "ANOMALY_BLOCKED" });
-    }
-
-    await reviseListing({
-      parentItemId: p.parentItemId || p.ebayParentItemId,
-      variationName: p.variationName,
-      variationValue: p.variationValue,
-      amazonSku: p.amazonSku,
-      quantity: Number(p.quantity),
-      price: newSell
-    });
-
-    res.json({ ok: true, sell: newSell });
-
-  } catch (err) {
-    console.error("❌ SYNC ERROR:", err);
-    res.status(500).json({ ok: false, error: err.message });
-  }
+  });
 });
 
-app.listen(3000, () =>
-  console.log("🚀 Server running on 3000 (PROTECTED MODE)")
-);
+/* =========================
+   START
+========================= */
+
+app.listen(3000, () => {
+  console.log("🚀 Server running on 3000 (GLOBAL SYNC QUEUE ACTIVE)");
+});
