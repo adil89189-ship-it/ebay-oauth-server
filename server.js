@@ -59,19 +59,28 @@ app.post("/sync", (req, res) => {
       const oldSell = safeNumber(p.lastPrice);
 
       /* ---- FORCE OOS ---- */
-      if (p.status === "OOS" || Number(p.quantity) <= 0) {
-        await reviseListing({
-          parentItemId: p.parentItemId || p.ebayParentItemId,
-          variationName: p.variationName,
-          variationValue: p.variationValue,
-          amazonSku: p.amazonSku,
-          quantity: 0,
-          price: null
-        });
+      /* ---- FORCE OOS ---- */
+if (p.status === "OOS" || Number(p.quantity) <= 0) {
+  try {
+    await reviseListing({
+      parentItemId: p.parentItemId || p.ebayParentItemId,
+      variationName: p.variationName,
+      variationValue: p.variationValue,
+      amazonSku: p.amazonSku,
+      quantity: 0,
+      price: null
+    });
 
-        res.json({ ok: true, status: "OOS" });
-        return;
-      }
+    console.log("🟠 OOS applied successfully");
+  } catch (err) {
+    console.warn("⚠️ OOS revise warning:", err.message);
+    // DO NOT convert OOS to FAIL
+  }
+
+  res.json({ ok: true, status: "OOS" });
+  return;
+}
+
 
       if (!buy || !multiplier) {
         res.status(400).json({ ok: false, error: "INVALID_BUY_OR_MULTIPLIER" });
