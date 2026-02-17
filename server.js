@@ -54,7 +54,7 @@ app.post("/sync", (req, res) => {
 
       const p = req.body;
 
-      const buy = safeNumber(p.buy || p.lastBuy || p.price);
+      const buy = safeNumber(p.buy);
       const multiplier = safeNumber(p.multiplier);
       const oldSell = safeNumber(p.lastPrice);
 
