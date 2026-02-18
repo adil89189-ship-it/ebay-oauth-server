@@ -29,9 +29,12 @@ function round2(n) {
 
 function isAnomalous(newPrice, oldPrice) {
   if (!oldPrice) return false;
-  const drop = (oldPrice - newPrice) / oldPrice;
-  return drop > 0.2;
+
+  const change = Math.abs(newPrice - oldPrice) / oldPrice;
+
+  return change > 0.25; // block >25% up OR down
 }
+
 
 /* =========================
    ROUTES
